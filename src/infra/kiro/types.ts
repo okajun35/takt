@@ -11,6 +11,11 @@ export interface KiroCallOptions {
   effort?: KiroEffort;
   /** kiro-cli `--mode` value (V3 agent mode). `--agent` overrides the mode. */
   mode?: KiroMode;
+  /**
+   * kiro-cli `--trust-workspace` (V3). Defaults to true; set false so workspace
+   * `.kiro` hooks/MCP do not load for untrusted repositories.
+   */
+  trustWorkspace?: boolean;
   systemPrompt?: string;
   permissionMode?: PermissionMode;
   onStream?: StreamCallback;

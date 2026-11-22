@@ -699,6 +699,51 @@ describe('resolveEffectiveProviderOptions', () => {
     )).toBe('step');
   });
 
+  it('env origin の kiro.mode は step/persona より優先される', () => {
+    // selectProviderValue は origin が env/cli の config 値を step/persona より
+    // 優先する。env の spec と step/persona の default が競合したとき実効値は spec。
+    expect(resolveEffectiveProviderOptions(
+      'project',
+      (path: string) => (path === 'kiro.mode' ? 'env' : 'local'),
+      { kiro: { mode: 'spec' } },
+      { kiro: { mode: 'default' } },
+      { kiro: { mode: 'default' } },
+    )).toEqual({
+      kiro: { mode: 'spec' },
+    });
+
+    expect(resolveProviderOptionSource(
+      'kiro.mode',
+      { kiro: { mode: 'default' } },
+      [],
+      { kiro: { mode: 'spec' } },
+      (path: string) => (path === 'kiro.mode' ? 'env' : 'local'),
+      'project',
+    )).toBe('env');
+  });
+
+  it('kiro.trustWorkspace は step > persona > config の優先で解決される', () => {
+    expect(resolveEffectiveProviderOptions(
+      'project',
+      undefined,
+      { kiro: { trustWorkspace: true } },
+      { kiro: { trustWorkspace: false } },
+      { kiro: { trustWorkspace: true } },
+    )).toEqual({
+      kiro: { trustWorkspace: false },
+    });
+
+    expect(resolveEffectiveProviderOptions(
+      'project',
+      undefined,
+      { kiro: { trustWorkspace: false } },
+      undefined,
+      { kiro: { trustWorkspace: true } },
+    )).toEqual({
+      kiro: { trustWorkspace: true },
+    });
+  });
+
   it('kiro.effort のみ指定でも結果は undefined にならない', () => {
     const result = resolveEffectiveProviderOptions(
       'global',
@@ -1280,6 +1325,7 @@ describe('providerOptionsContract', () => {
       'provider_options.kiro.agent',
       'provider_options.kiro.effort',
       'provider_options.kiro.mode',
+      'provider_options.kiro.trust_workspace',
       'provider_options.kiro.guards.call_timeout_ms',
       'provider_options.cursor.guards.call_timeout_ms',
       'provider_options.deepseek_harness.base_url',
@@ -1323,6 +1369,7 @@ describe('providerOptionsContract', () => {
     expect(PROVIDER_OPTIONS_TRACE_PATHS).toContain('provider_options.kiro.agent');
     expect(PROVIDER_OPTIONS_TRACE_PATHS).toContain('provider_options.kiro.effort');
     expect(PROVIDER_OPTIONS_TRACE_PATHS).toContain('provider_options.kiro.mode');
+    expect(PROVIDER_OPTIONS_TRACE_PATHS).toContain('provider_options.kiro.trust_workspace');
     expect(PROVIDER_OPTIONS_TRACE_PATHS).toContain('provider_options.kiro.guards.call_timeout_ms');
     expect(PROVIDER_OPTIONS_TRACE_PATHS).toContain('provider_options.cursor.guards.call_timeout_ms');
     expect(PROVIDER_OPTIONS_TRACE_PATHS).toContain('provider_options.deepseek_harness');

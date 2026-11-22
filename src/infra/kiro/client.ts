@@ -67,8 +67,9 @@ function buildArgs(options: KiroCallOptions): string[] {
     '--agent-engine',
     'v3',
     // V3 only, per-launch and not persisted: without it the run still proceeds
-    // but hooks/agents/MCP from cwd's .kiro silently do not load.
-    '--trust-workspace',
+    // but hooks/agents/MCP from cwd's .kiro silently do not load. Opt out with
+    // provider_options.kiro.trust_workspace: false for untrusted repositories.
+    ...(options.trustWorkspace !== false ? ['--trust-workspace'] : []),
     '--output-format',
     'stream-json',
     ...buildTrustArgs(options),

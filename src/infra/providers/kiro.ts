@@ -34,6 +34,7 @@ function toKiroOptions(options: ProviderCallOptions, systemPrompt?: string): Kir
     agent: options.providerOptions?.kiro?.agent,
     effort: options.providerOptions?.kiro?.effort,
     mode: options.providerOptions?.kiro?.mode,
+    trustWorkspace: options.providerOptions?.kiro?.trustWorkspace,
     childProcessEnv: options.childProcessEnv,
     preparedMcp: options.preparedMcp,
   };

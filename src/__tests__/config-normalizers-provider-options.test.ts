@@ -447,6 +447,52 @@ describe('denormalizeProviderOptions', () => {
     })).toThrow();
   });
 
+  it.each(['default', 'spec'])('should round-trip kiro mode through the schema and normalizers: %s', (mode) => {
+    const rawProviderOptions = {
+      kiro: {
+        mode,
+      },
+    };
+
+    const parsedProviderOptions = StepProviderOptionsObjectSchema.parse(rawProviderOptions);
+    const normalizedProviderOptions = normalizeProviderOptions(parsedProviderOptions);
+    const denormalizedProviderOptions = denormalizeProviderOptions(normalizedProviderOptions);
+
+    expect(normalizedProviderOptions).toEqual({
+      kiro: {
+        mode,
+      },
+    });
+    expect(denormalizedProviderOptions).toEqual(rawProviderOptions);
+  });
+
+  it('should reject a kiro mode value that kiro-cli does not accept', () => {
+    expect(() => StepProviderOptionsObjectSchema.parse({
+      kiro: {
+        mode: 'plan',
+      },
+    })).toThrow();
+  });
+
+  it.each([true, false])('should round-trip kiro trust_workspace through the schema and normalizers: %s', (trustWorkspace) => {
+    const rawProviderOptions = {
+      kiro: {
+        trust_workspace: trustWorkspace,
+      },
+    };
+
+    const parsedProviderOptions = StepProviderOptionsObjectSchema.parse(rawProviderOptions);
+    const normalizedProviderOptions = normalizeProviderOptions(parsedProviderOptions);
+    const denormalizedProviderOptions = denormalizeProviderOptions(normalizedProviderOptions);
+
+    expect(normalizedProviderOptions).toEqual({
+      kiro: {
+        trustWorkspace,
+      },
+    });
+    expect(denormalizedProviderOptions).toEqual(rawProviderOptions);
+  });
+
   it('should round-trip kiro agent through normalize and denormalize', () => {
     const rawProviderOptions = {
       kiro: {

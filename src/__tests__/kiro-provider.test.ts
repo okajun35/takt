@@ -182,6 +182,50 @@ describe('KiroProvider', () => {
     );
   });
 
+  it('Given providerOptions.kiro.mode, When agent is called, Then passes the mode to callKiro', async () => {
+    mockCallKiro.mockResolvedValue(doneResponse('planner'));
+
+    const provider = new KiroProvider();
+    const agent = provider.setup({ name: 'planner' });
+
+    await agent.call('plan the feature', {
+      cwd: '/tmp/work',
+      providerOptions: {
+        kiro: { mode: 'spec' },
+      },
+    });
+
+    expect(mockCallKiro).toHaveBeenCalledWith(
+      'planner',
+      'plan the feature',
+      expect.objectContaining({
+        mode: 'spec',
+      }),
+    );
+  });
+
+  it('Given providerOptions.kiro.trustWorkspace, When agent is called, Then passes the flag to callKiro', async () => {
+    mockCallKiro.mockResolvedValue(doneResponse('planner'));
+
+    const provider = new KiroProvider();
+    const agent = provider.setup({ name: 'planner' });
+
+    await agent.call('plan the feature', {
+      cwd: '/tmp/work',
+      providerOptions: {
+        kiro: { trustWorkspace: false },
+      },
+    });
+
+    expect(mockCallKiro).toHaveBeenCalledWith(
+      'planner',
+      'plan the feature',
+      expect.objectContaining({
+        trustWorkspace: false,
+      }),
+    );
+  });
+
   it('Given no providerOptions, When agent is called, Then passes undefined agent to callKiro', async () => {
     mockCallKiro.mockResolvedValue(doneResponse('coder'));
 

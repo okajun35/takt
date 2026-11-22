@@ -178,6 +178,7 @@ const KiroProviderOptionsSchema = z.object({
   agent: z.string().min(1).optional(),
   effort: KiroEffortSchema.optional(),
   mode: KiroModeSchema.optional(),
+  trust_workspace: z.boolean().optional(),
   guards: ProviderGuardOptionsSchema.optional(),
 });
 
@@ -724,6 +725,7 @@ const NormalizedStepProviderOptionsSchema = z.object({
     agent: z.string().min(1).optional(),
     effort: KiroEffortSchema.optional(),
     mode: KiroModeSchema.optional(),
+    trustWorkspace: z.boolean().optional(),
     guards: z.object({
       callTimeoutMs: z.number().int().min(60_000).max(86_400_000).optional(),
     }).strict().optional(),

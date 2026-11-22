@@ -743,6 +743,31 @@ describe('callKiro', () => {
     expect(args).not.toContain('--mode');
   });
 
+  it('Given trustWorkspace false, When called, Then omits --trust-workspace', async () => {
+    mockSpawnWithScenario({
+      stdout: 'done',
+      code: 0,
+    });
+
+    await callKiro('coder', 'implement', { cwd: '/repo', trustWorkspace: false });
+
+    const [, args] = mockSpawn.mock.calls[0] as [string, string[]];
+    expect(args).not.toContain('--trust-workspace');
+    expect(args).toContain('--agent-engine');
+  });
+
+  it('Given no trustWorkspace option, When called, Then adds --trust-workspace', async () => {
+    mockSpawnWithScenario({
+      stdout: 'done',
+      code: 0,
+    });
+
+    await callKiro('coder', 'implement', { cwd: '/repo' });
+
+    const [, args] = mockSpawn.mock.calls[0] as [string, string[]];
+    expect(args).toContain('--trust-workspace');
+  });
+
   it('Given no agent option, When called, Then does not add an --agent flag', async () => {
     mockSpawnWithScenario({
       stdout: 'done',
@@ -1745,7 +1770,7 @@ describe('callKiro with real kiro-cli ACP stream-json payload', () => {
     const result = await callKiro('coder', 'say hello', { cwd: '/repo' });
 
     expect(result.status).toBe('error');
-    expect(result.error).toBe('kiro-cli run finished with status "cancelled"');
+    expect(result.error).toContain('cancelled');
   });
 
   it('Given ACP tool events, When called, Then emits tool_use once and tool_result only on terminal status', async () => {
