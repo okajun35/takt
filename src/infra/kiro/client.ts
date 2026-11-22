@@ -2,7 +2,7 @@ import type { AgentResponse } from '../../core/models/index.js';
 import type { StreamEvent } from '../../shared/types/provider.js';
 import { createLogger, getErrorMessage, stripAnsi } from '../../shared/utils/index.js';
 import { execKiro, type KiroExecError } from './process.js';
-import { isKiroV3SessionId, listKiroSessions } from './sessionList.js';
+import { isKiroV3SessionId } from './sessionList.js';
 import type { KiroCallOptions } from './types.js';
 import {
   extractStructuredText,
@@ -33,11 +33,12 @@ function buildPrompt(prompt: string, systemPrompt?: string): string {
   return `${systemPrompt}\n\n${prompt}`;
 }
 
-// V3 tool IDs. V2 names are only accepted since Kiro CLI 3.3.0 and each name
-// grants its whole permission capability — `write` would also trust
-// delete_file and str_replace. `delete_file` is deliberately absent: V2's
-// fs_write had no delete operation, so the previous edit scope never covered
-// file deletion. `run_command`/`execute_pwsh` are the V3 shell ids;
+// V3 tool IDs. Note that `fs_write` is also the name of a V2 tool and of the
+// V3 `fs_write` permission capability: kiro-cli 3.5.0 documents that a V2 name
+// trusts its whole capability, so naming it also trusts delete_file,
+// edit_code, create_hook and the other `fs_write`-capability tools. That does
+// not widen edit mode, which already trusts the shell tools (and so file
+// deletion through them). `run_command`/`execute_pwsh` are the V3 shell ids;
 // `execute_bash` is listed in the V3 catalog as well — unmatched names are
 // ignored, so all three are safe to name.
 const KIRO_V3_READONLY_TRUST_TOOLS = 'read_file,list_directory,file_search,grep_search';
@@ -313,19 +314,6 @@ function cleanKiroOutput(raw: string): string {
   return stripAnsi(raw).replace(KIRO_LEADING_PROMPT_PATTERN, '').trim();
 }
 
-// Runs only for a brand-new session (no `options.sessionId` yet): the main
-// turn already succeeded, so a failure here (non-zero exit, ENOENT, no session
-// found) must not turn the overall result into an error — it just leaves the
-// session ID unresolved for this turn.
-async function resolveLatestSessionId(options: KiroCallOptions): Promise<string | undefined> {
-  const sessions = await listKiroSessions(options);
-  // The newest V3 session is the one this turn created. A v2-store entry names
-  // a different conversation — resuming it under --agent-engine v3 would import
-  // that old session instead of this turn's, so the ID stays unresolved when
-  // no V3 candidate exists.
-  return sessions?.find((session) => session.source === 'v3')?.sessionId;
-}
-
 interface KiroParsedOutput {
   readonly content: string;
   readonly sessionId?: string;
@@ -401,7 +389,7 @@ function extractKiroSessionId(value: unknown): string | undefined {
     nestedMetadata?.session_id,
   ]);
   // A resolved ID is later passed back through --resume-id, so keep only the
-  // V3 `sess_` shape here as well; anything else falls back to --list-sessions.
+  // V3 `sess_` shape here as well; anything else leaves the session ID unresolved.
   return candidate !== undefined && isKiroV3SessionId(candidate) ? candidate : undefined;
 }
 
@@ -650,12 +638,12 @@ export class KiroClient {
         };
       }
 
-      // First turn (no session yet): resolve the real session ID now so the
-      // caller can resume with `--resume-id` on the next turn. Resume turns
-      // already know their session ID, so skip the extra process spawn.
-      const resolvedSessionId = options.sessionId
-        ?? parsed.sessionId
-        ?? await resolveLatestSessionId(effectiveOptions);
+      // First turn (no session yet): the stream-json events carry this run's
+      // own `sess_` ID, so the caller can resume with `--resume-id` next turn.
+      // Without one the ID stays unresolved and the next turn starts a fresh
+      // session — `--list-sessions` is not consulted, because its newest entry
+      // can belong to another chat or a parallel step in the same workspace.
+      const resolvedSessionId = options.sessionId ?? parsed.sessionId;
 
       emitRedactedEvents(options, parsed.events, effectiveKiroApiKey, redaction);
       emitResult(options, content, true, undefined, resolvedSessionId);

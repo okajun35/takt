@@ -159,46 +159,6 @@ function mockSpawnWithScenario(scenario: SpawnScenario): void {
   });
 }
 
-function mockSpawnSequence(scenarios: SpawnScenario[]): void {
-  let callIndex = 0;
-  mockSpawn.mockImplementation((_cmd: string, _args: string[], _options: object) => {
-    const scenario = scenarios[callIndex];
-    callIndex += 1;
-    const child = createMockChildProcess();
-
-    queueMicrotask(() => {
-      if (!scenario) {
-        const error = Object.assign(new Error(`Unexpected spawn call #${callIndex} (only ${scenarios.length} scenarios defined)`), {
-          code: 'ERR_TEST_UNEXPECTED_SPAWN',
-        });
-        child.emit('error', error);
-        return;
-      }
-
-      if (scenario.stdout) {
-        child.stdout.emit('data', Buffer.from(scenario.stdout, 'utf-8'));
-      }
-      if (scenario.stderr) {
-        child.stderr.emit('data', Buffer.from(scenario.stderr, 'utf-8'));
-      }
-
-      if (scenario.error) {
-        const error = Object.assign(new Error(scenario.error.message), scenario.error);
-        child.emit('error', error);
-        return;
-      }
-
-      child.emit(
-        'close',
-        scenario.code === undefined ? 0 : scenario.code,
-        scenario.signal === undefined ? null : scenario.signal,
-      );
-    });
-
-    return child;
-  });
-}
-
 describe('callKiro', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1212,49 +1172,71 @@ describe('callKiro session ID resolution (issue #781)', () => {
   });
 
   const sessionId = 'sess_123e4567-e89b-12d3-a456-426614174000';
-  const listJson = (
-    entries: Array<{ sessionId: string; source?: string }>,
-    cwd = '/repo',
-  ) => JSON.stringify([{ cwd, sessions: entries, complete: true }]);
 
-  it('Given no session ID, When the main call succeeds, Then resolves the real session by invoking chat --list-sessions and returns its session ID', async () => {
-    mockSpawnSequence([
-      { stdout: 'Implementation complete.', code: 0 },
-      { stdout: listJson([{ sessionId, source: 'v3' }]), code: 0 },
-    ]);
+  const listSessionsCalls = () => mockSpawn.mock.calls.filter(
+    (call) => Array.isArray(call[1]) && (call[1] as string[]).includes('--list-sessions'),
+  );
+
+  it('Given no session ID and stream-json events carrying the run session ID, When called, Then returns that ID without spawning --list-sessions', async () => {
+    mockSpawnWithScenario({
+      stdout: [
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'done' } } } }),
+        JSON.stringify({ type: 'runFinished', data: { sessionId, status: 'success' } }),
+        '',
+      ].join('\n'),
+      code: 0,
+    });
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'implement feature', { cwd: '/repo', onStream });
+
+    expect(result.status).toBe('done');
+    expect(result.sessionId).toBe(sessionId);
+    expect(onStream).toHaveBeenCalledWith({
+      type: 'result',
+      data: expect.objectContaining({ sessionId, success: true }),
+    });
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    expect(listSessionsCalls()).toHaveLength(0);
+  });
+
+  // --list-sessions の先頭は同じワークスペースの対話中 Kiro や並列ステップの
+  // セッションであり得る。出力に ID が無ければ推測せず未解決にし、次ターンは
+  // 新規セッションで始める。
+  it('Given no session ID and output without a session ID, When the call succeeds, Then leaves the session ID unresolved without spawning --list-sessions', async () => {
+    mockSpawnWithScenario({ stdout: 'Implementation complete.', code: 0 });
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'implement feature', { cwd: '/repo', onStream });
+
+    expect(result.status).toBe('done');
+    expect(result.content).toBe('Implementation complete.');
+    expect(result.sessionId).toBeUndefined();
+    expect(onStream).toHaveBeenCalledWith({
+      type: 'result',
+      data: expect.objectContaining({ sessionId: '', success: true }),
+    });
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    expect(listSessionsCalls()).toHaveLength(0);
+  });
+
+  it('Given stream-json events carrying a non-V3 session ID, When called, Then leaves the session ID unresolved', async () => {
+    mockSpawnWithScenario({
+      stdout: [
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: '123e4567-e89b-12d3-a456-426614174000', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'done' } } } }),
+        '',
+      ].join('\n'),
+      code: 0,
+    });
 
     const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
 
     expect(result.status).toBe('done');
-    expect(result.content).toBe('Implementation complete.');
-    expect(result.sessionId).toBe(sessionId);
-
-    expect(mockSpawn).toHaveBeenCalledTimes(2);
-    const [, firstArgs] = mockSpawn.mock.calls[0] as [string, string[]];
-    const [, secondArgs, secondOptions] = mockSpawn.mock.calls[1] as [
-      string,
-      string[],
-      { cwd?: string },
-    ];
-    expect(firstArgs).toEqual([
-      'chat',
-      '--no-interactive',
-      '--agent-engine',
-      'v3',
-      '--output-format',
-      'stream-json',
-    ]);
-    expect(secondArgs).toEqual(['chat', '--list-sessions', '--format', 'json']);
-    expect(secondOptions.cwd).toBe('/repo');
-    const firstChild = mockSpawn.mock.results[0]?.value as MockChildProcess;
-    const secondChild = mockSpawn.mock.results[1]?.value as MockChildProcess;
-    expect(firstChild.stdin.write).toHaveBeenCalledWith('implement feature');
-    // The --list-sessions spawn must not receive prompt input on stdin.
-    expect(secondChild.stdin.write).not.toHaveBeenCalled();
-    expect(secondChild.stdin.end).toHaveBeenCalledOnce();
+    expect(result.sessionId).toBeUndefined();
+    expect(listSessionsCalls()).toHaveLength(0);
   });
 
-  it('Given an existing session ID (resume turn), When called, Then does not invoke --list-sessions and returns the same session ID', async () => {
+  it('Given an existing session ID (resume turn), When called, Then returns the same session ID with a single spawn', async () => {
     mockSpawnWithScenario({ stdout: 'done', code: 0 });
 
     const result = await callKiro('coder', 'continue', {
@@ -1265,88 +1247,6 @@ describe('callKiro session ID resolution (issue #781)', () => {
     expect(result.status).toBe('done');
     expect(result.sessionId).toBe('sess_prev');
     expect(mockSpawn).toHaveBeenCalledTimes(1);
-  });
-
-  it('Given no session ID, When --list-sessions fails after the main call already succeeded, Then still returns success with an undefined session ID', async () => {
-    mockSpawnSequence([
-      { stdout: 'Implementation complete.', code: 0 },
-      { code: 1 },
-    ]);
-
-    const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
-
-    expect(result.status).toBe('done');
-    expect(result.content).toBe('Implementation complete.');
-    expect(result.sessionId).toBeUndefined();
-    expect(mockSpawn).toHaveBeenCalledTimes(2);
-  });
-
-  it('Given no session ID, When --list-sessions fails after the main call already succeeded, Then records the failure via log.debug instead of swallowing it silently', async () => {
-    mockSpawnSequence([
-      { stdout: 'Implementation complete.', code: 0 },
-      { code: 1 },
-    ]);
-
-    await callKiro('coder', 'implement feature', { cwd: '/repo' });
-
-    expect(debugSpy).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ error: expect.any(String) }),
-    );
-  });
-
-  it('Given no session ID and an abort signal already aborted after the main call succeeds, When resolving the session ID, Then skips --list-sessions and returns an undefined session ID', async () => {
-    const controller = new AbortController();
-
-    mockSpawn.mockImplementation(() => {
-      const child = createMockChildProcess();
-      queueMicrotask(() => {
-        child.stdout.emit('data', Buffer.from('Implementation complete.', 'utf-8'));
-        child.emit('close', 0, null);
-        // Abort after the main call's close event resolves but before the
-        // `await execKiro` continuation (which calls resolveLatestSessionId)
-        // runs on the next microtask tick.
-        controller.abort();
-      });
-      return child;
-    });
-
-    const result = await callKiro('coder', 'implement feature', {
-      cwd: '/repo',
-      abortSignal: controller.signal,
-    });
-
-    expect(result.status).toBe('done');
-    expect(result.content).toBe('Implementation complete.');
-    expect(result.sessionId).toBeUndefined();
-    expect(mockSpawn).toHaveBeenCalledTimes(1);
-  });
-
-  it('Given no session ID, When --list-sessions output is not JSON, Then still returns success with an undefined session ID', async () => {
-    mockSpawnSequence([
-      { stdout: 'done', code: 0 },
-      { stdout: 'no sessions found', code: 0 },
-    ]);
-
-    const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
-
-    expect(result.status).toBe('done');
-    expect(result.sessionId).toBeUndefined();
-  });
-
-  it('Given no session ID and a resolvable session, When onStream is provided, Then the result event carries the resolved session ID', async () => {
-    mockSpawnSequence([
-      { stdout: 'stream content', code: 0 },
-      { stdout: listJson([{ sessionId, source: 'v3' }]), code: 0 },
-    ]);
-
-    const onStream = vi.fn();
-    await callKiro('coder', 'implement', { cwd: '/repo', onStream });
-
-    expect(onStream).toHaveBeenCalledWith({
-      type: 'result',
-      data: expect.objectContaining({ sessionId, success: true }),
-    });
   });
 
   it('Given no session ID and stdout that cleans to empty, When command succeeds, Then returns the empty-output error without attempting session resolution', async () => {
@@ -1374,110 +1274,6 @@ describe('callKiro session ID resolution (issue #781)', () => {
     expect(result.content).toContain('kiro-cli binary not found');
     expect(result.sessionId).toBeUndefined();
     expect(mockSpawn).toHaveBeenCalledTimes(1);
-  });
-
-  const otherSessionId = 'sess_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-
-  it('Given --list-sessions stderr text that merely resembles a session ID, When resolving the session ID, Then does not match it and returns undefined', async () => {
-    mockSpawnSequence([
-      { stdout: 'Implementation complete.', code: 0 },
-      { stderr: sessionId, code: 0 },
-    ]);
-
-    const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
-
-    expect(result.status).toBe('done');
-    expect(result.sessionId).toBeUndefined();
-  });
-
-  it('Given sessions for multiple workspaces in --list-sessions stdout, When resolving the session ID, Then ignores other workspaces', async () => {
-    mockSpawnSequence([
-      { stdout: 'Implementation complete.', code: 0 },
-      {
-        stdout: JSON.stringify([
-          { cwd: '/other', sessions: [{ sessionId: otherSessionId, source: 'v3' }], complete: true },
-          { cwd: '/repo', sessions: [{ sessionId, source: 'v3' }], complete: true },
-        ]),
-        code: 0,
-      },
-    ]);
-
-    const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
-
-    expect(result.status).toBe('done');
-    expect(result.sessionId).toBe(sessionId);
-  });
-
-  it('Given --list-sessions only lists other workspaces, When resolving the session ID, Then returns undefined', async () => {
-    mockSpawnSequence([
-      { stdout: 'Implementation complete.', code: 0 },
-      {
-        stdout: JSON.stringify([
-          { cwd: '/other', sessions: [{ sessionId: otherSessionId, source: 'v3' }], complete: true },
-        ]),
-        code: 0,
-      },
-    ]);
-
-    const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
-
-    expect(result.status).toBe('done');
-    expect(result.sessionId).toBeUndefined();
-  });
-
-  it('Given non-v3 and v3 sessions in --list-sessions stdout, When resolving the session ID, Then prefers the v3 session', async () => {
-    mockSpawnSequence([
-      { stdout: 'Implementation complete.', code: 0 },
-      {
-        stdout: listJson([
-          { sessionId: otherSessionId, source: 'v2' },
-          { sessionId, source: 'v3' },
-        ]),
-        code: 0,
-      },
-    ]);
-
-    const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
-
-    expect(result.status).toBe('done');
-    expect(result.sessionId).toBe(sessionId);
-  });
-
-  // V2 セッションは別の会話を指す。V3 実行が出力 ID を持たず一覧にも V3 候補が
-  // 無いとき、旧 V2 ID を返すと次ターンの --resume-id が別会話を開いてしまう。
-  it('Given --list-sessions stdout has only v2 sessions, When resolving the session ID, Then leaves it unresolved', async () => {
-    mockSpawnSequence([
-      { stdout: 'Implementation complete.', code: 0 },
-      {
-        stdout: listJson([{ sessionId: otherSessionId, source: 'v2' }]),
-        code: 0,
-      },
-    ]);
-
-    const onStream = vi.fn();
-    const result = await callKiro('coder', 'implement feature', {
-      cwd: '/repo',
-      onStream,
-    });
-
-    expect(result.status).toBe('done');
-    expect(result.sessionId).toBeUndefined();
-    expect(onStream).toHaveBeenCalledWith({
-      type: 'result',
-      data: expect.objectContaining({ sessionId: '', success: true }),
-    });
-  });
-
-  it('Given multiple v3 sessions in --list-sessions stdout, When resolving the session ID, Then returns the first one (most recent session listed first)', async () => {
-    mockSpawnSequence([
-      { stdout: 'Implementation complete.', code: 0 },
-      { stdout: listJson([{ sessionId, source: 'v3' }, { sessionId: otherSessionId, source: 'v3' }]), code: 0 },
-    ]);
-
-    const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
-
-    expect(result.status).toBe('done');
-    expect(result.sessionId).toBe(sessionId);
   });
 });
 

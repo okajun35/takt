@@ -187,7 +187,7 @@ describe('KiroProvider integration', () => {
     expect(child.stdin.write).toHaveBeenCalledWith('plan the feature');
   });
 
-  it('Given no session ID, When provider agent calls the real client and succeeds, Then resolves the session ID via a second --list-sessions spawn (issue #781)', async () => {
+  it('Given no session ID, When provider agent calls the real client and succeeds, Then takes the session ID from the stream-json output in a single spawn (issue #781)', async () => {
     const kiroCliPath = join(testDir, 'kiro-cli');
     writeFileSync(kiroCliPath, '#!/bin/sh\necho kiro\n', 'utf-8');
     chmodSync(kiroCliPath, 0o755);
@@ -202,25 +202,18 @@ describe('KiroProvider integration', () => {
     );
 
     const sessionId = 'sess_123e4567-e89b-12d3-a456-426614174000';
-    mockSpawn
-      .mockImplementationOnce(() => {
-        const child = createMockChildProcess();
-        queueMicrotask(() => {
-          child.stdout.emit('data', Buffer.from('turn one result', 'utf-8'));
-          child.emit('close', 0, null);
-        });
-        return child;
-      })
-      .mockImplementationOnce(() => {
-        const child = createMockChildProcess();
-        queueMicrotask(() => {
-          child.stdout.emit('data', Buffer.from(JSON.stringify([
-            { cwd: testDir, sessions: [{ sessionId, source: 'v3' }], complete: true },
-          ]), 'utf-8'));
-          child.emit('close', 0, null);
-        });
-        return child;
+    mockSpawn.mockImplementationOnce(() => {
+      const child = createMockChildProcess();
+      queueMicrotask(() => {
+        child.stdout.emit('data', Buffer.from([
+          JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'turn one result' } } } }),
+          JSON.stringify({ type: 'runFinished', data: { sessionId, status: 'success' } }),
+          '',
+        ].join('\n'), 'utf-8'));
+        child.emit('close', 0, null);
       });
+      return child;
+    });
 
     const provider = new KiroProvider();
     const agent = provider.setup({ name: 'coder' });
@@ -233,15 +226,7 @@ describe('KiroProvider integration', () => {
     expect(result.status).toBe('done');
     expect(result.content).toBe('turn one result');
     expect(result.sessionId).toBe(sessionId);
-    expect(mockSpawn).toHaveBeenCalledTimes(2);
-
-    const [, secondArgs, secondOptions] = mockSpawn.mock.calls[1] as [
-      string,
-      string[],
-      { cwd?: string },
-    ];
-    expect(secondArgs).toEqual(['chat', '--list-sessions', '--format', 'json']);
-    expect(secondOptions.cwd).toBe(testDir);
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
   });
 
   it('Given no providerOptions, When provider agent calls real client, Then spawn args have no --agent flag', async () => {

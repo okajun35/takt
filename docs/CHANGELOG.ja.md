@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Kiro プロバイダーを V3 エンジン（`--agent-engine v3`）に移行しました。ターンは ACP `stream-json` を出力し、ツール呼び出しと更新は構造化イベントとしてストリームされ、セッションは `--resume-id` と V3 の `sess_` ID で再開します。セッション ID は実行自身の stream-json 出力から取得し、出力に ID がないときは `--list-sessions` で推測せず、次のターンは新しいセッションで始めます。`provider_options.kiro.trust_workspace: true` は、ユーザーが管理する設定（グローバル `config.yaml`、環境変数、CLI 上書き）からのみ有効です。
+
 ## [0.76.1] - 2026-11-17
 
 ### Fixed

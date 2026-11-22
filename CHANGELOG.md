@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Migrated the Kiro provider to the V3 agent engine (`--agent-engine v3`). Turns emit ACP `stream-json`, tool calls and updates stream as structured events, and sessions resume with `--resume-id` and V3 `sess_` IDs. The session ID is taken from the run's own stream-json output; when the output carries no ID the next turn starts a fresh session instead of guessing one from `--list-sessions`. `provider_options.kiro.trust_workspace: true` is honored only from user-managed sources (global `config.yaml`, environment variables, CLI overrides).
+
 ## [0.76.1] - 2026-11-17
 
 ### Fixed
