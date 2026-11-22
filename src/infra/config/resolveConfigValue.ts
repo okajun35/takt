@@ -1,6 +1,7 @@
 import * as globalConfigModule from './global/globalConfig.js';
 import { loadGlobalConfigTraceState } from './global/globalConfigCore.js';
 import {
+  isDenyWinsGrantOrigin,
   isDenyWinsProviderOptionPath,
   mergeProviderOptions,
   resolveEffectiveProviderOptions,
@@ -653,13 +654,25 @@ export function resolveProviderOptionsWithTrace(
 
   const originResolver: ProviderOptionsOriginResolver = (path: string) => {
     if (isDenyWinsProviderOptionPath(path)) {
+      const tracePath = toProviderOptionsTracePath(path);
       // A `false` refusal decides the effective value — attribute the layer
       // that refused, not a layer that merely granted `true`.
       if (providerOptionValue(project.providerOptions, path) === false) {
-        return projectTrace.getOrigin(toProviderOptionsTracePath(path));
+        return projectTrace.getOrigin(tracePath);
       }
       if (providerOptionValue(global.providerOptions, path) === false) {
-        return globalTrace.getOrigin(toProviderOptionsTracePath(path));
+        return globalTrace.getOrigin(tracePath);
+      }
+      // A `true` grants only from user-managed origins: an env/CLI value in
+      // either trace, or the user's global config file. A project-layer
+      // `true` ('local') must not hide a global grant by being checked first.
+      const projectOrigin = projectTrace.getOrigin(tracePath);
+      if (projectOrigin === 'env' || projectOrigin === 'cli') {
+        return projectOrigin;
+      }
+      const globalOrigin = globalTrace.getOrigin(tracePath);
+      if (isDenyWinsGrantOrigin(globalOrigin)) {
+        return globalOrigin;
       }
     }
     if (

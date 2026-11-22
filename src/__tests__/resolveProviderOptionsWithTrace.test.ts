@@ -639,13 +639,9 @@ describe('resolveProviderOptionsWithTrace', () => {
       { kiro: { trustWorkspace: true } },
     )?.kiro?.trustWorkspace).toBeUndefined();
 
-    // global の付与を検証するため project 側の trust_workspace は外す
-    // （両方に true があると帰属が project になり付与が否定される）。
-    writeFileSync(
-      join(configDir, 'config.yaml'),
-      ['language: en'].join('\n'),
-      'utf-8',
-    );
+    // project 側の true を残したまま global にも true を書く。共有設定の
+    // true が帰属を 'local' に上書きしてユーザーの global 付与を隠しては
+    // いけない（拒否がない限り global/env/CLI の許可は有効）。
     writeFileSync(
       globalConfigPath,
       [
@@ -660,6 +656,7 @@ describe('resolveProviderOptionsWithTrace', () => {
     invalidateAllResolvedConfigCache();
 
     const globalGranted = resolveProviderOptionsWithTrace(projectDir);
+    expect(globalGranted.originResolver('kiro.trustWorkspace')).toBe('global');
     expect(resolveEffectiveProviderOptions(
       globalGranted.source,
       globalGranted.originResolver,
@@ -730,6 +727,28 @@ describe('resolveProviderOptionsWithTrace', () => {
 
     expect(resolved.value?.kiro?.trustWorkspace).toBe(false);
     expect(resolved.originResolver('kiro.trustWorkspace')).toBe('global');
+    expect(effective?.kiro?.trustWorkspace).toBe(false);
+  });
+
+  // TAKT_PROVIDER_OPTIONS の root JSON にある trust_workspace:false も拒否。
+  // 同じ env 優先度の leaf 変数に true を書くと leaf trace entry が上書きされ、
+  // root JSON の拒否が見えなくなる — env 合成の前に祖先 JSON の拒否を拾う。
+  it('TAKT_PROVIDER_OPTIONS の kiro.trust_workspace: false は leaf env の true に覆されない', () => {
+    process.env.TAKT_PROVIDER_OPTIONS = JSON.stringify({
+      kiro: { trust_workspace: false },
+    });
+    process.env.TAKT_PROVIDER_OPTIONS_KIRO_TRUST_WORKSPACE = 'true';
+
+    const resolved = resolveProviderOptionsWithTrace(projectDir);
+    const effective = resolveEffectiveProviderOptions(
+      resolved.source,
+      resolved.originResolver,
+      resolved.value,
+      undefined,
+    );
+
+    expect(resolved.value?.kiro?.trustWorkspace).toBe(false);
+    expect(resolved.originResolver('kiro.trustWorkspace')).toBe('env');
     expect(effective?.kiro?.trustWorkspace).toBe(false);
   });
 });

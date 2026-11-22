@@ -129,6 +129,33 @@ function getBlockingAncestorTraceEntry(
   return undefined;
 }
 
+/**
+ * A `false` refusal inside an env/CLI JSON ancestor — e.g.
+ * TAKT_PROVIDER_OPTIONS={"kiro":{"trust_workspace":false}} — cannot be seen
+ * in the leaf trace entry once a same-precedence leaf env `true` overwrites
+ * it, so the denial must be recovered from the ancestor's value.
+ */
+function hasEnvJsonRefusalAtPath(
+  traceEntries: ReadonlyMap<string, TracedValue<unknown>>,
+  path: string,
+): boolean {
+  const segments = path.split('.');
+  for (let index = 1; index < segments.length; index += 1) {
+    const traced = traceEntries.get(segments.slice(0, index).join('.'));
+    if (
+      traced === undefined
+      || (traced.origin !== 'env' && traced.origin !== 'cli')
+      || !isRecord(traced.value)
+    ) {
+      continue;
+    }
+    if (getNestedConfigValue(traced.value, segments.slice(index).join('.')) === false) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function buildRawConfig(
   schemaKeys: readonly string[],
   traceEntries: ReadonlyMap<string, TracedValue<unknown>>,
@@ -148,7 +175,15 @@ function buildRawConfig(
     if (getBlockingAncestorTraceEntry(traceEntries, key)) {
       continue;
     }
-    setNestedConfigValue(rawConfig, key, traced.value);
+    // Clone object values: traced.value is shared with the trace entry, and a
+    // deeper key's write must not mutate the record origins are read from.
+    setNestedConfigValue(
+      rawConfig,
+      key,
+      typeof traced.value === 'object' && traced.value !== null
+        ? structuredClone(traced.value)
+        : traced.value,
+    );
   }
 
   for (const path of filePreferredEnvPaths) {
@@ -165,9 +200,14 @@ function buildRawConfig(
     if (!schemaKeys.includes(path)) {
       continue;
     }
-    // A file-side `false` is a refusal: an env/cli `true` must not overwrite it
-    // here, or the deny-wins merge downstream would never see the refusal.
-    if (getNestedConfigValue(parsedConfig, path) === false) {
+    // A `false` is a refusal wherever it is declared — the file or an
+    // env/cli JSON ancestor such as TAKT_PROVIDER_OPTIONS. A leaf env `true`
+    // must not overwrite it here, or the deny-wins merge downstream would
+    // never see the refusal.
+    if (
+      getNestedConfigValue(parsedConfig, path) === false
+      || hasEnvJsonRefusalAtPath(traceEntries, path)
+    ) {
       setNestedConfigValue(rawConfig, path, false);
     }
   }

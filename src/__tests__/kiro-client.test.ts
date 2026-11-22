@@ -1959,6 +1959,31 @@ describe('callKiro with real kiro-cli ACP stream-json payload', () => {
     expect(emitted).toEqual(['text', 'result']);
   });
 
+  // runStarted だけが stdout に残った非ゼロ終了では、ACP の終端診断が無い。
+  // パーサーの「本文を抽出できない」診断で終了コードと stderr を上書きしない。
+  it('Given a non-zero exit with only a runStarted record on stdout, When called, Then keeps the exit code and stderr diagnostic', async () => {
+    mockSpawnWithScenario({
+      stdout: [
+        JSON.stringify({ type: 'runStarted', data: { sessionId, engine: 'v3' } }),
+        '',
+      ].join('\n'),
+      code: 1,
+      stderr: 'MCP startup failure',
+    });
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'say hi', { cwd: '/repo', onStream });
+
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('code 1');
+    expect(result.error).toContain('MCP startup failure');
+    expect(result.error).not.toContain('extract');
+    const emitted = onStream.mock.calls.map(([event]) => event.type);
+    expect(emitted).toEqual(['result']);
+    const resultEvent = onStream.mock.calls.at(-1)?.[0] as { data: { error?: string } };
+    expect(resultEvent.data.error).toContain('code 1');
+  });
+
   // runError の message には CLI 側がエラー文をそのまま乗せることがあり、
   // API キーを含み得る。終了コード 0 / 非ゼロのどちらの経路でも、ストリームの
   // result イベントと返り値の error の両方がマスク済みであることを確認する。

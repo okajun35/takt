@@ -413,7 +413,7 @@ function collectKiroStructuredEvents(
 
 function parseKiroOutput(
   stdout: string,
-): KiroParsedOutput | { error: string; events?: StreamEvent[] } {
+): KiroParsedOutput | { error: string; events?: StreamEvent[]; terminal?: true } {
   const trimmed = stdout.trim();
   if (!trimmed) {
     return { error: 'kiro-cli returned empty output' };
@@ -438,13 +438,17 @@ function parseKiroOutput(
 
   // A failed run still reports the tool events it produced: the caller streams
   // them before the failure result so tool use stays visible and recorded.
+  // `terminal` marks a diagnostic the run itself declared (runError / a
+  // non-success runFinished) — unlike a parser extraction failure, it is
+  // allowed to replace a process-level diagnostic on a non-zero exit.
   if (terminalContent.runError !== undefined) {
-    return { error: terminalContent.runError, events };
+    return { error: terminalContent.runError, events, terminal: true };
   }
   if (terminalContent.runStatus !== undefined && terminalContent.runStatus !== 'success') {
     return {
       error: `kiro-cli run finished with status "${terminalContent.runStatus}"`,
       events,
+      terminal: true,
     };
   }
 
@@ -564,7 +568,10 @@ export class KiroClient {
         if (partial.events !== undefined && partial.events.length > 0) {
           emitStructuredEvents(options.onStream, partial.events);
         }
-        if ('error' in partial && !options.abortSignal?.aborted) {
+        // Only a run-declared terminal diagnostic replaces the process
+        // diagnostic — a parser extraction failure (e.g. stdout held only a
+        // runStarted line) must not hide the exit code and stderr detail.
+        if ('error' in partial && partial.terminal === true && !options.abortSignal?.aborted) {
           message = redactedTrimmedDetail(partial.error, effectiveKiroApiKey);
         }
       }
