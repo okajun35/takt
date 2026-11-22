@@ -66,10 +66,15 @@ function buildArgs(options: KiroCallOptions): string[] {
     '--no-interactive',
     '--agent-engine',
     'v3',
-    // V3 only, per-launch and not persisted: without it the run still proceeds
-    // but hooks/agents/MCP from cwd's .kiro silently do not load. Opt out with
-    // provider_options.kiro.trust_workspace: false for untrusted repositories.
-    ...(options.trustWorkspace !== false ? ['--trust-workspace'] : []),
+    // V3 only, per-launch and not persisted. Never sent under readonly: the
+    // flag trusts workspace-defined hooks/MCP servers, which start external
+    // processes outside the read-only tool sandbox. Other modes add it by
+    // default — without it the run still proceeds but hooks/agents/MCP from
+    // cwd's .kiro silently do not load — and trust_workspace: false opts out
+    // for untrusted repositories (see provider_options.kiro).
+    ...(options.permissionMode !== 'readonly' && options.trustWorkspace !== false
+      ? ['--trust-workspace']
+      : []),
     '--output-format',
     'stream-json',
     ...buildTrustArgs(options),
@@ -195,10 +200,11 @@ function cleanKiroOutput(raw: string): string {
 // session ID unresolved for this turn.
 async function resolveLatestSessionId(options: KiroCallOptions): Promise<string | undefined> {
   const sessions = await listKiroSessions(options);
-  // The newest V3 session is the one this turn created; a v2-store entry cannot
-  // be resumed under --agent-engine v3, so prefer `source: "v3"` entries.
-  return sessions?.find((session) => session.source === 'v3')?.sessionId
-    ?? sessions?.[0]?.sessionId;
+  // The newest V3 session is the one this turn created. A v2-store entry names
+  // a different conversation — resuming it under --agent-engine v3 would import
+  // that old session instead of this turn's, so the ID stays unresolved when
+  // no V3 candidate exists.
+  return sessions?.find((session) => session.source === 'v3')?.sessionId;
 }
 
 interface KiroParsedOutput {
@@ -480,7 +486,9 @@ function collectKiroStructuredEvents(
   }
 }
 
-function parseKiroOutput(stdout: string): KiroParsedOutput | { error: string } {
+function parseKiroOutput(
+  stdout: string,
+): KiroParsedOutput | { error: string; events?: StreamEvent[] } {
   const trimmed = stdout.trim();
   if (!trimmed) {
     return { error: 'kiro-cli returned empty output' };
@@ -503,11 +511,16 @@ function parseKiroOutput(stdout: string): KiroParsedOutput | { error: string } {
     collectKiroStructuredEvents(line, events, assistantText, terminalContent);
   }
 
+  // A failed run still reports the tool events it produced: the caller streams
+  // them before the failure result so tool use stays visible and recorded.
   if (terminalContent.runError !== undefined) {
-    return { error: terminalContent.runError };
+    return { error: terminalContent.runError, events };
   }
   if (terminalContent.runStatus !== undefined && terminalContent.runStatus !== 'success') {
-    return { error: `kiro-cli run finished with status "${terminalContent.runStatus}"` };
+    return {
+      error: `kiro-cli run finished with status "${terminalContent.runStatus}"`,
+      events,
+    };
   }
 
   // Every assistant text reaches the events as text. The terminal result (finalText, result, final) may
@@ -562,6 +575,7 @@ export class KiroClient {
       const { stdout } = await execKiro(args, effectiveOptions, promptText);
       const parsed = parseKiroOutput(stdout);
       if ('error' in parsed) {
+        emitStructuredEvents(options.onStream, parsed.events ?? []);
         emitResult(options, '', false, parsed.error, options.sessionId);
         return {
           persona: agentType,

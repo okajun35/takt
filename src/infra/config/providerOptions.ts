@@ -701,8 +701,14 @@ export function mergeProviderOptions(
         ...(layer.kiro.mode !== undefined
           ? { mode: layer.kiro.mode }
           : {}),
+        // trust_workspace is deny-wins: an explicit false in any layer keeps
+        // the flag off — a repo/workflow `true` cannot undo a user's refusal.
         ...(layer.kiro.trustWorkspace !== undefined
-          ? { trustWorkspace: layer.kiro.trustWorkspace }
+          ? {
+              trustWorkspace: result.kiro?.trustWorkspace === false
+                ? false
+                : layer.kiro.trustWorkspace,
+            }
           : {}),
         ...(layer.kiro.guards !== undefined
           ? { guards: { ...result.kiro?.guards, ...layer.kiro.guards } }
@@ -1210,12 +1216,20 @@ export function resolveEffectiveProviderOptions(
     stepOptions?.kiro?.mode,
     resolveProviderOptionOrigin(originResolver, 'kiro.mode', source),
   );
-  const kiroTrustWorkspace = selectProviderValue(
-    resolvedConfigOptions.kiro?.trustWorkspace,
-    personaOptions?.kiro?.trustWorkspace,
-    stepOptions?.kiro?.trustWorkspace,
-    resolveProviderOptionOrigin(originResolver, 'kiro.trustWorkspace', source),
-  );
+  // Same deny-wins rule as the config merge: an explicit false in any layer
+  // (user config, workflow step, persona) vetoes workspace trust — granting it
+  // runs repo-controlled hooks/MCP processes, so refusal must not be
+  // overridable by a more specific layer.
+  const kiroTrustWorkspace = resolvedConfigOptions.kiro?.trustWorkspace === false
+    || personaOptions?.kiro?.trustWorkspace === false
+    || stepOptions?.kiro?.trustWorkspace === false
+    ? false
+    : selectProviderValue(
+        resolvedConfigOptions.kiro?.trustWorkspace,
+        personaOptions?.kiro?.trustWorkspace,
+        stepOptions?.kiro?.trustWorkspace,
+        resolveProviderOptionOrigin(originResolver, 'kiro.trustWorkspace', source),
+      );
   const deepseekHarnessBaseUrl = selectProviderValueByScope(
     resolvedConfigOptions.deepseekHarness?.baseUrl,
     personaOptions?.deepseekHarness?.baseUrl,

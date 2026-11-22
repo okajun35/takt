@@ -722,7 +722,11 @@ describe('resolveEffectiveProviderOptions', () => {
     )).toBe('env');
   });
 
-  it('kiro.trustWorkspace は step > persona > config の優先で解決される', () => {
+  // trust_workspace はワークスペース定義の hooks/MCP プロセス起動を許可する
+  // 信頼付与なので、どのレイヤーの false も他レイヤーの true を上書きできない
+  // 拒否優先（deny-wins）で解決する。ユーザーの拒否をリポジトリ/ワークフローが
+  // 覆せないことが要件。
+  it('kiro.trustWorkspace はどのレイヤーの false も優先される deny-wins で解決される', () => {
     expect(resolveEffectiveProviderOptions(
       'project',
       undefined,
@@ -740,8 +744,36 @@ describe('resolveEffectiveProviderOptions', () => {
       undefined,
       { kiro: { trustWorkspace: true } },
     )).toEqual({
+      kiro: { trustWorkspace: false },
+    });
+
+    expect(resolveEffectiveProviderOptions(
+      'project',
+      undefined,
+      { kiro: { trustWorkspace: true } },
+      { kiro: { trustWorkspace: true } },
+      undefined,
+    )).toEqual({
       kiro: { trustWorkspace: true },
     });
+  });
+
+  it('mergeProviderOptions でも kiro.trustWorkspace の false は後続レイヤーの true を抑止する', () => {
+    // global config の false が project config の true に覆されない（deny-wins）。
+    expect(mergeProviderOptions(
+      asProviderOptions({ kiro: { trustWorkspace: false } }),
+      asProviderOptions({ kiro: { trustWorkspace: true } }),
+    )).toEqual({ kiro: { trustWorkspace: false } });
+
+    expect(mergeProviderOptions(
+      asProviderOptions({ kiro: { trustWorkspace: true } }),
+      asProviderOptions({ kiro: { trustWorkspace: false } }),
+    )).toEqual({ kiro: { trustWorkspace: false } });
+
+    expect(mergeProviderOptions(
+      asProviderOptions({ kiro: { trustWorkspace: true } }),
+      asProviderOptions({ kiro: { effort: 'low' } }),
+    )).toEqual({ kiro: { trustWorkspace: true, effort: 'low' } });
   });
 
   it('env origin の kiro.trustWorkspace は step/persona より優先される', () => {

@@ -12,8 +12,10 @@ export interface KiroCallOptions {
   /** kiro-cli `--mode` value (V3 agent mode). `--agent` overrides the mode. */
   mode?: KiroMode;
   /**
-   * kiro-cli `--trust-workspace` (V3). Defaults to true; set false so workspace
-   * `.kiro` hooks/MCP do not load for untrusted repositories.
+   * kiro-cli `--trust-workspace` (V3). The flag is added by default outside
+   * readonly mode; false omits it. Omission only controls the flag — a folder
+   * the user previously trusted in Kiro CLI may keep its persisted trust.
+   * An explicit `false` in any config layer wins over `true` elsewhere.
    */
   trustWorkspace?: boolean;
   systemPrompt?: string;

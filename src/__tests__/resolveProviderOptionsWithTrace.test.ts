@@ -547,4 +547,72 @@ describe('resolveProviderOptionsWithTrace', () => {
     expect(result.originResolver('deepseekHarness.baseUrl')).toBe('global');
     expect(result.originResolver('codex.networkAccess')).toBe('local');
   });
+
+  // 公開環境変数名 → 取り込み（mode文字列 / trust_workspace真偽値変換）→
+  // env origin の設定元受け渡し → 実効値解決 までの境界を通しで検証する。
+  it('kiro.mode / trust_workspace の env が step の競合値より優先され実効値に届く', () => {
+    const configDir = getProjectConfigDir(projectDir);
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, 'config.yaml'),
+      [
+        'provider_options:',
+        '  kiro:',
+        '    mode: default',
+        '    trust_workspace: true',
+      ].join('\n'),
+      'utf-8',
+    );
+    process.env.TAKT_PROVIDER_OPTIONS_KIRO_MODE = 'spec';
+    process.env.TAKT_PROVIDER_OPTIONS_KIRO_TRUST_WORKSPACE = 'false';
+
+    const resolved = resolveProviderOptionsWithTrace(projectDir);
+    const effective = resolveEffectiveProviderOptions(
+      resolved.source,
+      resolved.originResolver,
+      resolved.value,
+      { kiro: { mode: 'default', trustWorkspace: true } },
+    );
+
+    expect(resolved.originResolver('kiro.mode')).toBe('env');
+    expect(resolved.originResolver('kiro.trustWorkspace')).toBe('env');
+    expect(effective?.kiro?.mode).toBe('spec');
+    expect(effective?.kiro?.trustWorkspace).toBe(false);
+  });
+
+  // ユーザーの global config による trust_workspace:false は、対象リポジトリの
+  // project config による true で覆せない（deny-wins）。拒否の優先が実効値に
+  // 届くことを global→project の merge 境界で検証する。
+  it('global の kiro.trust_workspace: false は project の true に覆されない', () => {
+    writeFileSync(
+      globalConfigPath,
+      [
+        'language: en',
+        'provider_options:',
+        '  kiro:',
+        '    trust_workspace: false',
+      ].join('\n'),
+      'utf-8',
+    );
+    invalidateGlobalConfigCache();
+
+    const configDir = getProjectConfigDir(projectDir);
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, 'config.yaml'),
+      ['provider_options:', '  kiro:', '    trust_workspace: true'].join('\n'),
+      'utf-8',
+    );
+
+    const resolved = resolveProviderOptionsWithTrace(projectDir);
+    const effective = resolveEffectiveProviderOptions(
+      resolved.source,
+      resolved.originResolver,
+      resolved.value,
+      { kiro: { trustWorkspace: true } },
+    );
+
+    expect(resolved.value?.kiro?.trustWorkspace).toBe(false);
+    expect(effective?.kiro?.trustWorkspace).toBe(false);
+  });
 });

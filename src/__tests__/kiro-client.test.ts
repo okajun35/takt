@@ -551,7 +551,6 @@ describe('callKiro', () => {
       '--no-interactive',
       '--agent-engine',
       'v3',
-      '--trust-workspace',
       '--output-format',
       'stream-json',
       '--trust-tools=read,grep',
@@ -631,7 +630,6 @@ describe('callKiro', () => {
       '--no-interactive',
       '--agent-engine',
       'v3',
-      '--trust-workspace',
       '--output-format',
       'stream-json',
       '--trust-tools=read,grep',
@@ -766,6 +764,26 @@ describe('callKiro', () => {
 
     const [, args] = mockSpawn.mock.calls[0] as [string, string[]];
     expect(args).toContain('--trust-workspace');
+  });
+
+  // --trust-workspace は workspace 定義の hooks/MCP という外部プロセスを
+  // 信頼するフラグなので、読み取り専用サンドボックスとは両立しない。
+  // readonly では明示的な true 指定でも付与しない。
+  it('Given readonly permission, When called, Then omits --trust-workspace even when trustWorkspace is true', async () => {
+    mockSpawnWithScenario({
+      stdout: 'done',
+      code: 0,
+    });
+
+    await callKiro('coder', 'inspect', {
+      cwd: '/repo',
+      permissionMode: 'readonly',
+      trustWorkspace: true,
+    });
+
+    const [, args] = mockSpawn.mock.calls[0] as [string, string[]];
+    expect(args).not.toContain('--trust-workspace');
+    expect(args).toContain('--trust-tools=read,grep');
   });
 
   it('Given no agent option, When called, Then does not add an --agent flag', async () => {
@@ -1404,6 +1422,31 @@ describe('callKiro session ID resolution (issue #781)', () => {
     expect(result.sessionId).toBe(sessionId);
   });
 
+  // V2 セッションは別の会話を指す。V3 実行が出力 ID を持たず一覧にも V3 候補が
+  // 無いとき、旧 V2 ID を返すと次ターンの --resume-id が別会話を開いてしまう。
+  it('Given --list-sessions stdout has only v2 sessions, When resolving the session ID, Then leaves it unresolved', async () => {
+    mockSpawnSequence([
+      { stdout: 'Implementation complete.', code: 0 },
+      {
+        stdout: listJson([{ sessionId: otherSessionId, source: 'v2' }]),
+        code: 0,
+      },
+    ]);
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'implement feature', {
+      cwd: '/repo',
+      onStream,
+    });
+
+    expect(result.status).toBe('done');
+    expect(result.sessionId).toBeUndefined();
+    expect(onStream).toHaveBeenCalledWith({
+      type: 'result',
+      data: expect.objectContaining({ sessionId: '', success: true }),
+    });
+  });
+
   it('Given multiple v3 sessions in --list-sessions stdout, When resolving the session ID, Then returns the first one (most recent session listed first)', async () => {
     mockSpawnSequence([
       { stdout: 'Implementation complete.', code: 0 },
@@ -1806,14 +1849,41 @@ describe('callKiro with real kiro-cli ACP stream-json payload', () => {
     const result = await callKiro('coder', 'read a.ts', { cwd: '/repo', onStream });
 
     expect(result).toMatchObject({ status: 'done', sessionId });
-    expect(onStream).toHaveBeenCalledWith({
-      type: 'tool_use',
-      data: { id: 'tc-1', tool: 'Read File', input: { path: 'a.ts' } },
-    });
+    const toolUses = onStream.mock.calls.filter(([event]) => event.type === 'tool_use');
+    expect(toolUses).toEqual([[
+      { type: 'tool_use', data: { id: 'tc-1', tool: 'Read File', input: { path: 'a.ts' } } },
+    ]]);
     const toolResults = onStream.mock.calls.filter(([event]) => event.type === 'tool_result');
     expect(toolResults).toEqual([[
       { type: 'tool_result', data: { id: 'tc-1', content: 'file body', isError: false } },
     ]]);
+  });
+
+  // 終了コード 0 のラン失敗でも、それまでに発行されたツールイベントは失敗の
+  // result より先に届く必要がある（対話側の表示・利用記録が落ちないよう）。
+  it.each(['runError', 'runFinished'])('Given a %s failure after tool events, When called, Then emits the collected tool events before the failure result', async (failure) => {
+    const terminal = failure === 'runError'
+      ? JSON.stringify({ type: 'runError', data: { sessionId, stage: 'model', message: 'Model does not exist', errorType: 'InvalidModel' } })
+      : JSON.stringify({ type: 'runFinished', data: { sessionId, status: 'cancelled', finalText: '' } });
+    mockSpawnWithScenario({
+      stdout: [
+        JSON.stringify({ type: 'runStarted', data: { sessionId, engine: 'v3' } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call', toolCallId: 'tc-1', title: 'Read File', kind: 'read', rawInput: { path: 'a.ts' } } } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call_update', toolCallId: 'tc-1', status: 'completed', rawOutput: { message: 'file body' } } } }),
+        terminal,
+        '',
+      ].join('\n'),
+      code: 0,
+    });
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'read a.ts', { cwd: '/repo', onStream });
+
+    expect(result.status).toBe('error');
+    const emitted = onStream.mock.calls.map(([event]) => event.type);
+    expect(emitted).toEqual(['tool_use', 'tool_result', 'result']);
+    const resultEvent = onStream.mock.calls.at(-1)?.[0] as { data: { success: boolean } };
+    expect(resultEvent.data.success).toBe(false);
   });
 
   it('Given a failed ACP tool_call_update, When called, Then marks the tool_result as an error', async () => {

@@ -333,7 +333,7 @@ ignore_exceed: false          # takt run / takt watch で --ignore-exceed 相当
 #     agent: my-default-agent
 #     effort: medium
 #     mode: spec          # Kiro CLI V3 エージェントモード: default または spec（agent 指定が優先）
-#     trust_workspace: false  # V3: --trust-workspace を付けず、workspace の .kiro hooks/MCP を読み込まない（デフォルト: true）
+#     trust_workspace: false  # V3: --trust-workspace を省略（readonly モードでは常に省略）。どのレイヤーの false も優先（デフォルト: true）
 #   pi:
 #     extensions: [npm:pi-fff]
 #     no_skills: true
@@ -898,7 +898,7 @@ workflow の `promotion` entry は `runtime.yaml` で選択された target ladd
 
 **GitHub Copilot CLI** は `model` を `copilot --model <model>` にそのまま渡します。省略時は Copilot CLI のデフォルトが使用されます。
 
-**Kiro CLI** は `model` を `kiro-cli chat --model <model>` にそのまま渡します。省略時は Kiro CLI のデフォルトが使用されます。TAKT は常に V3 エンジンで起動します（`kiro-cli chat --no-interactive --agent-engine v3 --trust-workspace`）。ワークスペースの `.kiro` 配下の agent・hook・MCP 設定は対話プロンプトなしで読み込まれ、セッション ID は `sess_<uuid>` 形式です。`provider_options.kiro.mode` で V3 のモード（`default` または `spec`）を選択でき、`provider_options.kiro.agent` 指定があればモードより優先されます。`--trust-workspace` はワークスペース定義の hooks や MCP stdio サーバーを確認なしで実行するため、信頼できないリポジトリを `cwd` に指定する場合は `provider_options.kiro.trust_workspace: false` でフラグを外してください（その場合 workspace の `.kiro` agent・hook・MCP 設定は読み込まれません）。
+**Kiro CLI** は `model` を `kiro-cli chat --model <model>` にそのまま渡します。省略時は Kiro CLI のデフォルトが使用されます。TAKT は常に V3 エンジンで起動します（`kiro-cli chat --no-interactive --agent-engine v3`）。セッション ID は `sess_<uuid>` 形式です。`provider_options.kiro.mode` で V3 のモード（`default` または `spec`）を選択できます。非対話実行でのモード指定には Kiro CLI 3.5.0 以降が必要で、`provider_options.kiro.agent` の明示指定が優先され、新規セッションでは Kiro 側の `chat.defaultAgent` 設定も `--mode` より優先されます。デフォルトでは `--trust-workspace` を付与するため、ワークスペースの `.kiro` 配下の agent・hook・MCP 設定は対話プロンプトなしで読み込まれますが、これらはワークスペース定義の hooks や MCP stdio サーバーを確認なしで実行します。`provider_options.kiro.trust_workspace: false` でこのフラグを外せます（どの設定レイヤーでも `false` が優先されます。`readonly` 権限モードでは設定に関わらず常に付与しません）。このオプションが制御するのは TAKT が渡すフラグのみです。Kiro CLI で過去に信頼したフォルダーは永続化された信頼を保持するため、`false` だけでは `.kiro` 設定が読み込まれないことを保証できません。
 
 **Devin CLI** は `model` を `devin acp --model <model>` に渡します（例: `swe-2-max`、`swe-2-high`、`swe-2-medium`）。ACP session はその名前を `model` と `thought_level` の config option に解決し、解決・適用できない名前はデフォルトへフォールバックせずエラーになります。この検証は新規 session のみに適用され、再開 session は作成時のモデルを維持するため、指定された名前の再解決は行いません。省略時はユーザーの Devin config に設定されたデフォルトモデルが使用されます。
 
