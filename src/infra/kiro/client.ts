@@ -161,6 +161,60 @@ function redactStreamEvent(event: StreamEvent, kiroApiKey: string | undefined): 
   return { ...event, data: redactEventValue(event.data, kiroApiKey) } as StreamEvent;
 }
 
+// Assistant text arrives as consecutive chunks, and a chunk boundary can split
+// the API key — per-event whole-match redaction would then print the joined
+// secret to the stream. Hold back `key.length - 1` trailing characters (after
+// in-buffer replacement) so a split key is still masked; flush() returns the
+// held tail, which callers emit as a final text event before the result.
+function createTextRedactor(kiroApiKey: string | undefined): {
+  push(text: string): string;
+  flush(): string;
+} {
+  if (!kiroApiKey) {
+    return { push: (text) => text, flush: () => '' };
+  }
+  const hold = kiroApiKey.length - 1;
+  let pending = '';
+  return {
+    push(text: string): string {
+      pending = redactDetail(pending + text, kiroApiKey);
+      const out = pending.slice(0, Math.max(0, pending.length - hold));
+      pending = pending.slice(out.length);
+      return out;
+    },
+    flush(): string {
+      const out = pending;
+      pending = '';
+      return out;
+    },
+  };
+}
+
+function emitRedactedEvents(
+  options: KiroCallOptions,
+  events: readonly StreamEvent[],
+  kiroApiKey: string | undefined,
+): void {
+  const textRedactor = createTextRedactor(kiroApiKey);
+  emitStructuredEvents(
+    options.onStream,
+    events.map((event) => {
+      if (event.type !== 'text') {
+        return redactStreamEvent(event, kiroApiKey);
+      }
+      const text = (event.data as { text?: unknown } | undefined)?.text;
+      return {
+        ...event,
+        data: { ...event.data, text: textRedactor.push(typeof text === 'string' ? text : '') },
+      } as StreamEvent;
+    }),
+  );
+  const tail = textRedactor.flush();
+  if (tail.length > 0) {
+    options.onStream?.({ type: 'text', data: { text: tail } });
+  }
+}
+
 function redactedTrimmedDetail(value: string | undefined, kiroApiKey: string | undefined): string {
   return trimDetail(redactDetail(value ?? '', kiroApiKey));
 }
@@ -539,10 +593,7 @@ export class KiroClient {
         // as process errors — a runError message can embed credential
         // material, and the stream and the response share the masked value.
         const errorMessage = redactedTrimmedDetail(parsed.error, effectiveKiroApiKey);
-        emitStructuredEvents(
-          options.onStream,
-          (parsed.events ?? []).map((event) => redactStreamEvent(event, effectiveKiroApiKey)),
-        );
+        emitRedactedEvents(options, parsed.events ?? [], effectiveKiroApiKey);
         emitResult(options, '', false, errorMessage, options.sessionId);
         return {
           persona: agentType,
@@ -579,10 +630,7 @@ export class KiroClient {
         ?? parsed.sessionId
         ?? await resolveLatestSessionId(effectiveOptions);
 
-      emitStructuredEvents(
-        options.onStream,
-        parsed.events.map((event) => redactStreamEvent(event, effectiveKiroApiKey)),
-      );
+      emitRedactedEvents(options, parsed.events, effectiveKiroApiKey);
       emitResult(options, content, true, undefined, resolvedSessionId);
 
       return {
@@ -608,10 +656,7 @@ export class KiroClient {
         // unredacted secret, and the masked process diagnostic already
         // reports it.
         if (partial.rawText !== true && partial.events !== undefined && partial.events.length > 0) {
-          emitStructuredEvents(
-            options.onStream,
-            partial.events.map((event) => redactStreamEvent(event, effectiveKiroApiKey)),
-          );
+          emitRedactedEvents(options, partial.events, effectiveKiroApiKey);
         }
         // Only a run-declared terminal diagnostic replaces the process
         // diagnostic — a parser extraction failure (e.g. stdout held only a
