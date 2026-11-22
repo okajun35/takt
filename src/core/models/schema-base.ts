@@ -170,9 +170,14 @@ const KiroEffortSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max'], {
   error: (issue) => `Invalid Kiro effort ${JSON.stringify(issue.input)}; expected low, medium, high, xhigh, or max`,
 });
 
+const KiroModeSchema = z.enum(['default', 'spec'], {
+  error: (issue) => `Invalid Kiro mode ${JSON.stringify(issue.input)}; expected default or spec`,
+});
+
 const KiroProviderOptionsSchema = z.object({
   agent: z.string().min(1).optional(),
   effort: KiroEffortSchema.optional(),
+  mode: KiroModeSchema.optional(),
   guards: ProviderGuardOptionsSchema.optional(),
 });
 
@@ -718,6 +723,7 @@ const NormalizedStepProviderOptionsSchema = z.object({
   kiro: z.object({
     agent: z.string().min(1).optional(),
     effort: KiroEffortSchema.optional(),
+    mode: KiroModeSchema.optional(),
     guards: z.object({
       callTimeoutMs: z.number().int().min(60_000).max(86_400_000).optional(),
     }).strict().optional(),

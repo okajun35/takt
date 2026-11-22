@@ -323,6 +323,7 @@ ignore_exceed: false          # 对 takt run 和 takt watch 应用 --ignore-exce
 #   kiro:
 #     agent: my-default-agent
 #     effort: medium
+#     mode: spec          # Kiro CLI V3 代理模式：default 或 spec（agent 优先于 mode）
 #   pi:
 #     extensions: [npm:pi-fff]
 #     no_skills: true
@@ -853,7 +854,7 @@ devin_cli_path: /usr/local/bin/devin
 - **Pi** 接受 `provider/model` 引用或能唯一匹配 Pi model 的裸 ID。reference 只按 `/` 分割，因此 `provider/model:high` 中的 `model:high` 是字面 model ID。thinking level 通过 `provider_options.pi.thinking_level` 或 `TAKT_PROVIDER_OPTIONS_PI_THINKING_LEVEL` 设置；省略时使用 Pi SDK 默认值 `medium`。显式设置的 level 会应用于每个 Pi turn。省略 model 时，TAKT 保留 Pi session 当前的 model。
 - **Cursor Agent** 将 model 原样传给 `cursor-agent --model <model>`。
 - **GitHub Copilot CLI** 将 model 原样传给 `copilot --model <model>`。
-- **Kiro CLI** 将 model 原样传给 `kiro-cli chat --model <model>`。
+- **Kiro CLI** 将 model 原样传给 `kiro-cli chat --model <model>`。TAKT 始终使用 V3 引擎运行（`kiro-cli chat --no-interactive --agent-engine v3 --trust-workspace`）：工作区 `.kiro` 下的 agent、hook 和 MCP 配置会在无交互信任提示的情况下加载，会话 ID 使用 `sess_<uuid>` 格式。`provider_options.kiro.mode` 用于选择 V3 模式（`default` 或 `spec`），显式指定 `provider_options.kiro.agent` 时优先于 mode。
 - **Devin CLI** 将 model 传给 `devin acp --model <model>`（例如 `swe-2-max`、`swe-2-high`、`swe-2-medium`）；ACP session 会把该名称解析为 `model` 与 `thought_level` 配置项，无法解析或应用的名称会立即报错，而不是静默回退到默认值。该校验仅适用于新建 session；恢复的 session 保留创建时使用的 model，不会重新解析所指定的名称。省略时使用用户 Devin config 中配置的默认 model。
 
 ### 示例

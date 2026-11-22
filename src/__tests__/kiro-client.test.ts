@@ -243,7 +243,8 @@ describe('callKiro', () => {
       'chat',
       '--no-interactive',
       '--agent-engine',
-      'v2',
+      'v3',
+      '--trust-workspace',
       '--output-format',
       'stream-json',
       '--trust-all-tools',
@@ -549,7 +550,8 @@ describe('callKiro', () => {
       'chat',
       '--no-interactive',
       '--agent-engine',
-      'v2',
+      'v3',
+      '--trust-workspace',
       '--output-format',
       'stream-json',
       '--trust-tools=read,grep',
@@ -574,7 +576,8 @@ describe('callKiro', () => {
       'chat',
       '--no-interactive',
       '--agent-engine',
-      'v2',
+      'v3',
+      '--trust-workspace',
       '--output-format',
       'stream-json',
     ]);
@@ -598,7 +601,8 @@ describe('callKiro', () => {
       'chat',
       '--no-interactive',
       '--agent-engine',
-      'v2',
+      'v3',
+      '--trust-workspace',
       '--output-format',
       'stream-json',
     ]);
@@ -626,7 +630,8 @@ describe('callKiro', () => {
       'chat',
       '--no-interactive',
       '--agent-engine',
-      'v2',
+      'v3',
+      '--trust-workspace',
       '--output-format',
       'stream-json',
       '--trust-tools=read,grep',
@@ -706,6 +711,36 @@ describe('callKiro', () => {
     const agentFlagIndex = args.indexOf('--agent');
     expect(agentFlagIndex).toBeGreaterThanOrEqual(0);
     expect(args[agentFlagIndex + 1]).toBe('coder-agent');
+  });
+
+  it('Given mode option, When called, Then passes --mode with the mode value', async () => {
+    mockSpawnWithScenario({
+      stdout: 'spec done',
+      code: 0,
+    });
+
+    const result = await callKiro('coder', 'plan the spec', {
+      cwd: '/repo',
+      mode: 'spec',
+    });
+
+    expect(result.status).toBe('done');
+    const [, args] = mockSpawn.mock.calls[0] as [string, string[]];
+    const modeFlagIndex = args.indexOf('--mode');
+    expect(modeFlagIndex).toBeGreaterThanOrEqual(0);
+    expect(args[modeFlagIndex + 1]).toBe('spec');
+  });
+
+  it('Given no mode option, When called, Then does not add a --mode flag', async () => {
+    mockSpawnWithScenario({
+      stdout: 'done',
+      code: 0,
+    });
+
+    await callKiro('coder', 'implement', { cwd: '/repo' });
+
+    const [, args] = mockSpawn.mock.calls[0] as [string, string[]];
+    expect(args).not.toContain('--mode');
   });
 
   it('Given no agent option, When called, Then does not add an --agent flag', async () => {
@@ -1111,19 +1146,23 @@ describe('callKiro session ID resolution (issue #781)', () => {
     restoreEnv();
   });
 
-  const uuid = '123e4567-e89b-12d3-a456-426614174000';
+  const sessionId = 'sess_123e4567-e89b-12d3-a456-426614174000';
+  const listJson = (
+    entries: Array<{ sessionId: string; source?: string }>,
+    cwd = '/repo',
+  ) => JSON.stringify([{ cwd, sessions: entries, complete: true }]);
 
-  it('Given no session ID, When the main call succeeds, Then resolves the real session by invoking chat --list-sessions and returns its UUID', async () => {
+  it('Given no session ID, When the main call succeeds, Then resolves the real session by invoking chat --list-sessions and returns its session ID', async () => {
     mockSpawnSequence([
       { stdout: 'Implementation complete.', code: 0 },
-      { stderr: `${uuid}  updated just now`, code: 0 },
+      { stdout: listJson([{ sessionId, source: 'v3' }]), code: 0 },
     ]);
 
     const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
 
     expect(result.status).toBe('done');
     expect(result.content).toBe('Implementation complete.');
-    expect(result.sessionId).toBe(uuid);
+    expect(result.sessionId).toBe(sessionId);
 
     expect(mockSpawn).toHaveBeenCalledTimes(2);
     const [, firstArgs] = mockSpawn.mock.calls[0] as [string, string[]];
@@ -1136,11 +1175,12 @@ describe('callKiro session ID resolution (issue #781)', () => {
       'chat',
       '--no-interactive',
       '--agent-engine',
-      'v2',
+      'v3',
+      '--trust-workspace',
       '--output-format',
       'stream-json',
     ]);
-    expect(secondArgs).toEqual(['chat', '--list-sessions']);
+    expect(secondArgs).toEqual(['chat', '--list-sessions', '--format', 'json']);
     expect(secondOptions.cwd).toBe('/repo');
     const firstChild = mockSpawn.mock.results[0]?.value as MockChildProcess;
     const secondChild = mockSpawn.mock.results[1]?.value as MockChildProcess;
@@ -1218,10 +1258,10 @@ describe('callKiro session ID resolution (issue #781)', () => {
     expect(mockSpawn).toHaveBeenCalledTimes(1);
   });
 
-  it('Given no session ID, When --list-sessions output has no UUID in either stream, Then still returns success with an undefined session ID', async () => {
+  it('Given no session ID, When --list-sessions output is not JSON, Then still returns success with an undefined session ID', async () => {
     mockSpawnSequence([
       { stdout: 'done', code: 0 },
-      { stderr: 'no sessions found', code: 0 },
+      { stdout: 'no sessions found', code: 0 },
     ]);
 
     const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
@@ -1230,10 +1270,10 @@ describe('callKiro session ID resolution (issue #781)', () => {
     expect(result.sessionId).toBeUndefined();
   });
 
-  it('Given no session ID and a resolvable UUID, When onStream is provided, Then the result event carries the resolved session ID', async () => {
+  it('Given no session ID and a resolvable session, When onStream is provided, Then the result event carries the resolved session ID', async () => {
     mockSpawnSequence([
       { stdout: 'stream content', code: 0 },
-      { stderr: uuid, code: 0 },
+      { stdout: listJson([{ sessionId, source: 'v3' }]), code: 0 },
     ]);
 
     const onStream = vi.fn();
@@ -1241,7 +1281,7 @@ describe('callKiro session ID resolution (issue #781)', () => {
 
     expect(onStream).toHaveBeenCalledWith({
       type: 'result',
-      data: expect.objectContaining({ sessionId: uuid, success: true }),
+      data: expect.objectContaining({ sessionId, success: true }),
     });
   });
 
@@ -1272,66 +1312,66 @@ describe('callKiro session ID resolution (issue #781)', () => {
     expect(mockSpawn).toHaveBeenCalledTimes(1);
   });
 
-  const otherUuid = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  const otherSessionId = 'sess_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 
-  it('Given ANSI escapes wrapping the UUID in --list-sessions stderr, When resolving the session ID, Then strips them before extracting', async () => {
+  it('Given --list-sessions stderr text that merely resembles a session ID, When resolving the session ID, Then does not match it and returns undefined', async () => {
     mockSpawnSequence([
       { stdout: 'Implementation complete.', code: 0 },
-      { stderr: `\x1b[36m${uuid}\x1b[0m  updated just now`, code: 0 },
-    ]);
-
-    const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
-
-    expect(result.status).toBe('done');
-    expect(result.sessionId).toBe(uuid);
-  });
-
-  it('Given no UUID in --list-sessions stderr but one in stdout, When resolving the session ID, Then falls back to stdout', async () => {
-    mockSpawnSequence([
-      { stdout: 'Implementation complete.', code: 0 },
-      { stdout: `${uuid}  updated just now`, stderr: 'no sessions listed', code: 0 },
-    ]);
-
-    const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
-
-    expect(result.status).toBe('done');
-    expect(result.sessionId).toBe(uuid);
-  });
-
-  it('Given UUIDs in both --list-sessions stdout and stderr, When resolving the session ID, Then prefers the stderr UUID', async () => {
-    mockSpawnSequence([
-      { stdout: 'Implementation complete.', code: 0 },
-      { stdout: `${otherUuid}  updated 1m ago`, stderr: `${uuid}  updated 2m ago`, code: 0 },
-    ]);
-
-    const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
-
-    expect(result.status).toBe('done');
-    expect(result.sessionId).toBe(uuid);
-  });
-
-  it('Given multiple UUIDs in --list-sessions stderr, When resolving the session ID, Then returns the first one (most recent session listed first)', async () => {
-    mockSpawnSequence([
-      { stdout: 'Implementation complete.', code: 0 },
-      { stderr: `${uuid}  updated just now\n${otherUuid}  updated 1h ago`, code: 0 },
-    ]);
-
-    const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
-
-    expect(result.status).toBe('done');
-    expect(result.sessionId).toBe(uuid);
-  });
-
-  it('Given --list-sessions stderr text that merely resembles a UUID (wrong segment lengths), When resolving the session ID, Then does not match it and returns undefined', async () => {
-    mockSpawnSequence([
-      { stdout: 'Implementation complete.', code: 0 },
-      { stderr: '1234-5678-9012-3456', code: 0 },
+      { stderr: sessionId, code: 0 },
     ]);
 
     const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
 
     expect(result.status).toBe('done');
     expect(result.sessionId).toBeUndefined();
+  });
+
+  it('Given sessions for multiple workspaces in --list-sessions stdout, When resolving the session ID, Then merges them in listing order', async () => {
+    mockSpawnSequence([
+      { stdout: 'Implementation complete.', code: 0 },
+      {
+        stdout: JSON.stringify([
+          { cwd: '/other', sessions: [{ sessionId: otherSessionId, source: 'v3' }], complete: true },
+          { cwd: '/repo', sessions: [{ sessionId, source: 'v3' }], complete: true },
+        ]),
+        code: 0,
+      },
+    ]);
+
+    const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
+
+    expect(result.status).toBe('done');
+    expect(result.sessionId).toBe(otherSessionId);
+  });
+
+  it('Given non-v3 and v3 sessions in --list-sessions stdout, When resolving the session ID, Then prefers the v3 session', async () => {
+    mockSpawnSequence([
+      { stdout: 'Implementation complete.', code: 0 },
+      {
+        stdout: listJson([
+          { sessionId: otherSessionId, source: 'v2' },
+          { sessionId, source: 'v3' },
+        ]),
+        code: 0,
+      },
+    ]);
+
+    const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
+
+    expect(result.status).toBe('done');
+    expect(result.sessionId).toBe(sessionId);
+  });
+
+  it('Given multiple v3 sessions in --list-sessions stdout, When resolving the session ID, Then returns the first one (most recent session listed first)', async () => {
+    mockSpawnSequence([
+      { stdout: 'Implementation complete.', code: 0 },
+      { stdout: listJson([{ sessionId, source: 'v3' }, { sessionId: otherSessionId, source: 'v3' }]), code: 0 },
+    ]);
+
+    const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
+
+    expect(result.status).toBe('done');
+    expect(result.sessionId).toBe(sessionId);
   });
 });
 
@@ -1405,18 +1445,10 @@ describe('callKiro output cleanup (issue #781)', () => {
   it('returns only the text after the last tool use as content when Kiro JSONL has no terminal result', async () => {
     mockSpawnWithScenario({
       stdout: [
-        JSON.stringify({
-          kind: 'AssistantMessage',
-          content: [
-            { kind: 'text', text: 'Progress note: checked input.ts. ' },
-            { kind: 'toolUse', toolUseId: 'kiro-tool-1', name: 'read', input: { path: 'retry.ts' } },
-          ],
-        }),
-        JSON.stringify({
-          kind: 'ToolResults',
-          content: [{ kind: 'toolResult', toolUseId: 'kiro-tool-1', status: 'success', content: [{ kind: 'text', text: 'retry source' }] }],
-        }),
-        JSON.stringify({ kind: 'AssistantMessage', content: [{ kind: 'text', text: 'Final answer' }] }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'sess-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Progress note: checked input.ts. ' } } } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'kiro-tool-1', title: 'read', kind: 'read', rawInput: { path: 'retry.ts' } } } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'kiro-tool-1', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'retry source' } }] } } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'sess-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Final answer' } } } }),
       ].join('\n'),
       code: 0,
     });
@@ -1434,17 +1466,9 @@ describe('callKiro output cleanup (issue #781)', () => {
   it('returns an empty successful answer with the session ID when the turn ends with a tool call', async () => {
     mockSpawnWithScenario({
       stdout: [
-        JSON.stringify({
-          kind: 'AssistantMessage',
-          content: [
-            { kind: 'text', text: 'Progress note: editing retry.ts. ' },
-            { kind: 'toolUse', toolUseId: 'kiro-tool-1', name: 'write', input: { path: 'retry.ts' } },
-          ],
-        }),
-        JSON.stringify({
-          kind: 'ToolResults',
-          content: [{ kind: 'toolResult', toolUseId: 'kiro-tool-1', status: 'success', content: [{ kind: 'text', text: 'written' }] }],
-        }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'kiro-session', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Progress note: editing retry.ts. ' } } } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'kiro-session', update: { sessionUpdate: 'tool_call', toolCallId: 'kiro-tool-1', title: 'write', kind: 'edit', rawInput: { path: 'retry.ts' } } } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'kiro-session', update: { sessionUpdate: 'tool_call_update', toolCallId: 'kiro-tool-1', status: 'completed', rawOutput: { message: 'written' } } } }),
       ].join('\n'),
       code: 0,
     });
@@ -1483,29 +1507,25 @@ describe('callKiro output cleanup (issue #781)', () => {
     mockSpawnWithScenario({
       stdout: warning + [
         JSON.stringify({
-          kind: 'AssistantMessage',
-          sessionId: 'kiro-session',
-          content: [{
-            kind: 'toolUse',
-            toolUseId: 'kiro-tool-1',
-            name: 'takt_get_run',
-            input: { runSlug: 'run-from-kiro' },
-          }],
+          type: 'sessionUpdate',
+          data: {
+            sessionId: 'kiro-session',
+            update: { sessionUpdate: 'tool_call', toolCallId: 'kiro-tool-1', title: 'takt_get_run', kind: 'execute', rawInput: { runSlug: 'run-from-kiro' } },
+          },
         }),
         JSON.stringify({
-          kind: 'ToolResults',
-          sessionId: 'kiro-session',
-          content: [{
-            kind: 'toolResult',
-            toolUseId: 'kiro-tool-1',
-            status: 'success',
-            content: [{ kind: 'text', text: `run details\n${marker}` }],
-          }],
+          type: 'sessionUpdate',
+          data: {
+            sessionId: 'kiro-session',
+            update: { sessionUpdate: 'tool_call_update', toolCallId: 'kiro-tool-1', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: `run details\n${marker}` } }] },
+          },
         }),
         JSON.stringify({
-          kind: 'AssistantMessage',
-          sessionId: 'kiro-session',
-          content: [{ kind: 'text', text: 'answer' }],
+          type: 'sessionUpdate',
+          data: {
+            sessionId: 'kiro-session',
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'answer' } },
+          },
         }),
       ].join('\n'),
       code: 0,
@@ -1519,7 +1539,8 @@ describe('callKiro output cleanup (issue #781)', () => {
       'chat',
       '--no-interactive',
       '--agent-engine',
-      'v2',
+      'v3',
+      '--trust-workspace',
       '--output-format',
       'stream-json',
     ]);
@@ -1549,18 +1570,19 @@ describe('callKiro output cleanup (issue #781)', () => {
   });
 });
 
-// kiro-cli 2.24.0 が `--output-format stream-json` で実際に出す ACP payload を
-// そのまま流し込む回帰テスト。既存テストは stdout が平文（'done' など）なので
-// JSONL 経路を通らず、パーサが実形状と食い違っていても緑になってしまう。
+// kiro-cli 3.5.0 (`--agent-engine v3`) が `--output-format stream-json` で実際に
+// 出す ACP payload をそのまま流し込む回帰テスト。既存テストは stdout が平文
+// （'done' など）なので JSONL 経路を通らず、パーサが実形状と食い違っていても
+// 緑になってしまう。
 describe('callKiro with real kiro-cli ACP stream-json payload', () => {
-  const sessionId = 'd396ce0c-da35-4615-80cf-fdf8ee9cea13';
+  const sessionId = 'sess_d396ce0c-da35-4615-80cf-fdf8ee9cea13';
 
-  // kiro-cli 2.24.0 (--agent-engine v2) の実出力を採取したもの。
+  // kiro-cli 3.5.0 (--agent-engine v3) の実出力を採取したもの。
   // 実出力の finalText はチャンク連結と同じ値だが、ここでは異なる値にしている —
   // 同値だと本文をどちらから取ったかを区別できない。
   const acpStdout = [
-    JSON.stringify({ type: 'runStarted', data: { payloadSchema: 'acp', acpProtocolVersion: 1, engine: 'v2' } }),
-    JSON.stringify({ type: 'metadata', data: { sessionId, contextUsagePercentage: 1.5 } }),
+    JSON.stringify({ type: 'runStarted', data: { payloadSchema: 'acp', acpProtocolVersion: 1, engine: 'v3' } }),
+    JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'session_info_update', contextUsagePercentage: 1.5 } } }),
     JSON.stringify({
       type: 'sessionUpdate',
       data: { sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'HEL' } } },
@@ -1690,5 +1712,83 @@ describe('callKiro with real kiro-cli ACP stream-json payload', () => {
       (call) => Array.isArray(call[1]) && (call[1] as string[]).includes('--list-sessions'),
     );
     expect(listSessionCalls).toHaveLength(0);
+  });
+
+  // V3 はラン失敗を `{"type":"runError"}` イベントで返し、終了コードは 0 のまま
+  // なのでプロセス層では検出できない。パーサが拾えないと空応答エラーに化ける。
+  it('Given a runError event with exit code 0, When called, Then surfaces the runError message', async () => {
+    mockSpawnWithScenario({
+      stdout: [
+        JSON.stringify({ type: 'runStarted', data: { sessionId, engine: 'v3' } }),
+        JSON.stringify({ type: 'runError', data: { sessionId, stage: 'model', message: 'Model does not exist', errorType: 'InvalidModel' } }),
+        '',
+      ].join('\n'),
+      code: 0,
+    });
+
+    const result = await callKiro('coder', 'say hello', { cwd: '/repo' });
+
+    expect(result.status).toBe('error');
+    expect(result.error).toBe('Model does not exist');
+  });
+
+  it('Given a runFinished event with a non-success status, When called, Then reports an error', async () => {
+    mockSpawnWithScenario({
+      stdout: [
+        JSON.stringify({ type: 'runStarted', data: { sessionId, engine: 'v3' } }),
+        JSON.stringify({ type: 'runFinished', data: { sessionId, status: 'cancelled', finalText: '' } }),
+        '',
+      ].join('\n'),
+      code: 0,
+    });
+
+    const result = await callKiro('coder', 'say hello', { cwd: '/repo' });
+
+    expect(result.status).toBe('error');
+    expect(result.error).toBe('kiro-cli run finished with status "cancelled"');
+  });
+
+  it('Given ACP tool events, When called, Then emits tool_use once and tool_result only on terminal status', async () => {
+    const toolEvents = [
+      JSON.stringify({ type: 'runStarted', data: { sessionId, engine: 'v3' } }),
+      JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call', toolCallId: 'tc-1', title: 'Read File', kind: 'read', rawInput: { path: 'a.ts' } } } }),
+      JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call_update', toolCallId: 'tc-1', status: 'pending' } } }),
+      JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call_update', toolCallId: 'tc-1', status: 'in_progress' } } }),
+      JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call_update', toolCallId: 'tc-1', status: 'completed', rawOutput: { message: 'file body' } } } }),
+      JSON.stringify({ type: 'runFinished', data: { sessionId, status: 'success', finalText: '' } }),
+      '',
+    ].join('\n');
+    mockSpawnWithScenario({ stdout: toolEvents, code: 0 });
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'read a.ts', { cwd: '/repo', onStream });
+
+    expect(result).toMatchObject({ status: 'done', sessionId });
+    expect(onStream).toHaveBeenCalledWith({
+      type: 'tool_use',
+      data: { id: 'tc-1', tool: 'Read File', input: { path: 'a.ts' } },
+    });
+    const toolResults = onStream.mock.calls.filter(([event]) => event.type === 'tool_result');
+    expect(toolResults).toEqual([[
+      { type: 'tool_result', data: { id: 'tc-1', content: 'file body', isError: false } },
+    ]]);
+  });
+
+  it('Given a failed ACP tool_call_update, When called, Then marks the tool_result as an error', async () => {
+    const failedTool = [
+      JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call', toolCallId: 'tc-9', title: 'write', kind: 'edit', rawInput: { path: 'a.ts' } } } }),
+      JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call_update', toolCallId: 'tc-9', status: 'failed', rawOutput: { message: 'denied' } } } }),
+      JSON.stringify({ type: 'runFinished', data: { sessionId, status: 'success', finalText: 'blocked' } }),
+      '',
+    ].join('\n');
+    mockSpawnWithScenario({ stdout: failedTool, code: 0 });
+
+    const onStream = vi.fn();
+    await callKiro('coder', 'write a.ts', { cwd: '/repo', onStream });
+
+    expect(onStream).toHaveBeenCalledWith({
+      type: 'tool_result',
+      data: { id: 'tc-9', content: 'denied', isError: true },
+    });
   });
 });

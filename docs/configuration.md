@@ -336,6 +336,7 @@ ignore_exceed: false          # Applies to takt run and takt watch like --ignore
 #   kiro:
 #     agent: my-default-agent
 #     effort: medium
+#     mode: spec          # Kiro CLI V3 agent mode: default or spec (agent overrides mode)
 #   pi:
 #     extensions: [npm:pi-fff]
 #     no_skills: true
@@ -901,7 +902,7 @@ In runtime mode, select the provider and model in `runtime.yaml`; CLI and enviro
 
 **GitHub Copilot CLI** forwards `model` directly to `copilot --model <model>`. If omitted, Copilot CLI default is used.
 
-**Kiro CLI** forwards `model` directly to `kiro-cli chat --model <model>`. If omitted, Kiro CLI default is used.
+**Kiro CLI** forwards `model` directly to `kiro-cli chat --model <model>`. If omitted, Kiro CLI default is used. TAKT always runs the V3 engine (`kiro-cli chat --no-interactive --agent-engine v3 --trust-workspace`), so workspace `.kiro` agents, hooks, and MCP config load without an interactive trust prompt, and sessions use the `sess_<uuid>` V3 identifiers. `provider_options.kiro.mode` selects the V3 mode (`default` or `spec`); an explicit `provider_options.kiro.agent` takes precedence over the mode.
 
 **Devin CLI** passes `model` to `devin acp --model <model>` (for example `swe-2-max`, `swe-2-high`, `swe-2-medium`); the ACP session resolves the name into its `model` and `thought_level` options, and a name that cannot be resolved or applied fails fast instead of silently falling back. This validation applies to new sessions; a resumed session keeps the model it was created with and does not re-resolve the requested name. If omitted, the default model configured in the user's Devin config is used.
 
@@ -1710,7 +1711,7 @@ Provider options can also be set with the corresponding `TAKT_PROVIDER_OPTIONS_*
 | Codex permissions and Skills | `TAKT_PROVIDER_OPTIONS_CODEX_PERMISSION_CONTROL=codex`, `TAKT_PROVIDER_OPTIONS_CODEX_SKILLS_REPO=true`, `TAKT_PROVIDER_OPTIONS_CODEX_SKILLS_USER=true` |
 | Claude Skills | `TAKT_PROVIDER_OPTIONS_CLAUDE_SKILLS_ENABLED=true` |
 | Claude terminal | `TAKT_PROVIDER_OPTIONS_CLAUDE_TERMINAL_BACKEND=tmux`, `TAKT_PROVIDER_OPTIONS_CLAUDE_TERMINAL_TIMEOUT_MS=900000`, `TAKT_PROVIDER_OPTIONS_CLAUDE_TERMINAL_KEEP_SESSION=false`, `TAKT_PROVIDER_OPTIONS_CLAUDE_TERMINAL_TRANSCRIPT_POLL_INTERVAL_MS=500` |
-| Kiro agent and effort | `TAKT_PROVIDER_OPTIONS_KIRO_AGENT=planner-agent`, `TAKT_PROVIDER_OPTIONS_KIRO_EFFORT=medium` |
+| Kiro agent, effort, and mode | `TAKT_PROVIDER_OPTIONS_KIRO_AGENT=planner-agent`, `TAKT_PROVIDER_OPTIONS_KIRO_EFFORT=medium`, `TAKT_PROVIDER_OPTIONS_KIRO_MODE=spec` |
 | Pi thinking and resources | `TAKT_PROVIDER_OPTIONS_PI_THINKING_LEVEL=high`, `TAKT_PROVIDER_OPTIONS_PI_EXTENSIONS='["npm:pi-fff"]'`, `TAKT_PROVIDER_OPTIONS_PI_NO_EXTENSIONS=true`, `TAKT_PROVIDER_OPTIONS_PI_NO_SKILLS=true`, `TAKT_PROVIDER_OPTIONS_PI_NO_PROMPT_TEMPLATES=true`, `TAKT_PROVIDER_OPTIONS_PI_NO_THEMES=true`, `TAKT_PROVIDER_OPTIONS_PI_NO_CONTEXT_FILES=true` |
 | Pi system prompt | `TAKT_PROVIDER_OPTIONS_PI_SYSTEM_PROMPT_MODE=append` or `replace` |
 

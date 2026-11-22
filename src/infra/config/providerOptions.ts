@@ -5,6 +5,7 @@ import type {
   CodexReasoningEffort,
   CopilotEffort,
   KiroEffort,
+  KiroMode,
   DeepSeekReasoningEffort,
   DeepSeekHarnessProviderOptions,
   OpenCodeGuardProfile,
@@ -89,6 +90,7 @@ type RawProviderOptions = {
   kiro?: {
     agent?: string;
     effort?: KiroEffort;
+    mode?: KiroMode;
     guards?: RawProviderGuardOptions;
   };
   cursor?: {
@@ -444,10 +446,11 @@ export function normalizeProviderOptions(
         : {}),
     };
   }
-  if (options.kiro?.agent !== undefined || options.kiro?.effort !== undefined || options.kiro?.guards !== undefined) {
+  if (options.kiro?.agent !== undefined || options.kiro?.effort !== undefined || options.kiro?.mode !== undefined || options.kiro?.guards !== undefined) {
     result.kiro = {
       ...(options.kiro.agent !== undefined ? { agent: options.kiro.agent } : {}),
       ...(options.kiro.effort !== undefined ? { effort: options.kiro.effort } : {}),
+      ...(options.kiro.mode !== undefined ? { mode: options.kiro.mode } : {}),
       ...(options.kiro.guards?.call_timeout_ms !== undefined
         ? { guards: { callTimeoutMs: options.kiro.guards.call_timeout_ms } }
         : {}),
@@ -692,6 +695,9 @@ export function mergeProviderOptions(
           : {}),
         ...(layer.kiro.effort !== undefined
           ? { effort: layer.kiro.effort }
+          : {}),
+        ...(layer.kiro.mode !== undefined
+          ? { mode: layer.kiro.mode }
           : {}),
         ...(layer.kiro.guards !== undefined
           ? { guards: { ...result.kiro?.guards, ...layer.kiro.guards } }
@@ -1193,6 +1199,12 @@ export function resolveEffectiveProviderOptions(
     stepOptions?.kiro?.effort,
     resolveProviderOptionOrigin(originResolver, 'kiro.effort', source),
   );
+  const kiroMode = selectProviderValue(
+    resolvedConfigOptions.kiro?.mode,
+    personaOptions?.kiro?.mode,
+    stepOptions?.kiro?.mode,
+    resolveProviderOptionOrigin(originResolver, 'kiro.mode', source),
+  );
   const deepseekHarnessBaseUrl = selectProviderValueByScope(
     resolvedConfigOptions.deepseekHarness?.baseUrl,
     personaOptions?.deepseekHarness?.baseUrl,
@@ -1444,11 +1456,12 @@ export function resolveEffectiveProviderOptions(
           },
         }
       : {}),
-    ...(kiroAgent !== undefined || kiroEffort !== undefined || kiroCallTimeoutMs !== undefined
+    ...(kiroAgent !== undefined || kiroEffort !== undefined || kiroMode !== undefined || kiroCallTimeoutMs !== undefined
       ? {
           kiro: {
             ...(kiroAgent !== undefined ? { agent: kiroAgent } : {}),
             ...(kiroEffort !== undefined ? { effort: kiroEffort } : {}),
+            ...(kiroMode !== undefined ? { mode: kiroMode } : {}),
             ...(kiroCallTimeoutMs !== undefined
               ? { guards: { callTimeoutMs: kiroCallTimeoutMs } }
               : {}),
@@ -1711,6 +1724,7 @@ export const PROVIDER_OPTION_PATHS = [
   'copilot.guards.callTimeoutMs',
   'kiro.agent',
   'kiro.effort',
+  'kiro.mode',
   'kiro.guards.callTimeoutMs',
   'cursor.guards.callTimeoutMs',
   'devin.guards.callTimeoutMs',

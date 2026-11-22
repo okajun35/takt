@@ -33,6 +33,7 @@ function toKiroOptions(options: ProviderCallOptions, systemPrompt?: string): Kir
     kiroCliPath: resolveKiroCliPath(),
     agent: options.providerOptions?.kiro?.agent,
     effort: options.providerOptions?.kiro?.effort,
+    mode: options.providerOptions?.kiro?.mode,
     childProcessEnv: options.childProcessEnv,
     preparedMcp: options.preparedMcp,
   };
@@ -41,9 +42,9 @@ function toKiroOptions(options: ProviderCallOptions, systemPrompt?: string): Kir
 export class KiroProvider implements Provider {
   readonly supportsStructuredOutput = false;
   readonly supportsNativeImageInput = false;
-  // kiro-cli には MCP 設定を実行時に注入する CLI フラグが無い（`--mcp-config` は
-  // 2.26.0 で `unexpected argument`）。V2/V3 とも agent 設定か `.kiro/settings/mcp.json`
-  // からしか MCP を読まないため、takt からの runtime MCP 割り当ては非対応と宣言する。
+  // kiro-cli には MCP 設定を実行時に注入する CLI フラグが無い。V3 は `--trust-workspace`
+  // で cwd の `.kiro` 配下（agents / MCP）を読み込むが、takt が任意の MCP 設定を実行時
+  // 指定する手段は依然ないため、runtime MCP 割り当ては非対応と宣言する。
   // 対話モードは MCP 利用不可の通知を出して継続し、workflow の割り当ては fail-fast する。
   readonly supportedMcpTransports: ReadonlySet<'stdio' | 'sse' | 'http'> = new Set();
 

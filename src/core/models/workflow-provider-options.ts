@@ -91,6 +91,7 @@ export type CodexReasoningEffort = string;
 export type ClaudeEffort = string;
 export type CopilotEffort = string;
 export type KiroEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type KiroMode = 'default' | 'spec';
 const RUNTIME_PREPARE_PRESET_SET: ReadonlySet<string> = new Set(RUNTIME_PREPARE_PRESETS);
 
 export function isRuntimePreparePreset(entry: string): entry is RuntimePreparePreset {
@@ -146,6 +147,8 @@ export interface CopilotProviderOptions {
 export interface KiroProviderOptions {
   agent?: string;
   effort?: KiroEffort;
+  /** kiro-cli `--mode` (V3 agent mode). An `--agent` selection overrides the mode. */
+  mode?: KiroMode;
   guards?: ProviderGuardOptions;
 }
 

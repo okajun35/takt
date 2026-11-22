@@ -6,8 +6,11 @@ vi.mock('../infra/config/index.js', () => ({ resolveKiroCliPath: mocks.path, res
 
 import { kiroSessionExists } from '../infra/kiro/sessionExistence.js';
 
-const first = '123e4567-e89b-12d3-a456-426614174000';
-const second = '123e4567-e89b-12d3-a456-426614174001';
+const first = 'sess_123e4567-e89b-12d3-a456-426614174000';
+const second = 'sess_123e4567-e89b-12d3-a456-426614174001';
+const sessionListJson = (ids: string[]) => JSON.stringify([
+  { cwd: '/project', sessions: ids.map((sessionId) => ({ sessionId, source: 'v3' })), complete: true },
+]);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -16,15 +19,20 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
-it('recognizes the first and subsequent session rows using the configured CLI and project', async () => {
-  mocks.exec.mockResolvedValue({ stdout: '', stderr: `${first}  updated just now\n${second}  updated 1h ago` });
+it('recognizes the first and subsequent session entries using the configured CLI and project', async () => {
+  mocks.exec.mockResolvedValue({ stdout: sessionListJson([first, second]), stderr: '' });
   expect(await kiroSessionExists('/project', first)).toBe(true);
   expect(await kiroSessionExists('/project', second)).toBe(true);
-  expect(mocks.exec).toHaveBeenCalledWith(['chat', '--list-sessions'], expect.objectContaining({ cwd: '/project', kiroCliPath: '/custom/kiro', kiroApiKey: 'key', abortSignal: expect.any(AbortSignal) }));
-  expect(await kiroSessionExists('/project', '123e4567-e89b-12d3-a456-426614174002')).toBeUndefined();
+  expect(mocks.exec).toHaveBeenCalledWith(['chat', '--list-sessions', '--format', 'json'], expect.objectContaining({ cwd: '/project', kiroCliPath: '/custom/kiro', kiroApiKey: 'key', abortSignal: expect.any(AbortSignal) }));
+  expect(await kiroSessionExists('/project', 'sess_123e4567-e89b-12d3-a456-426614174002')).toBeUndefined();
 });
 
-it('does not treat a diagnostic UUID or failed command as a session', async () => {
+it('matches session IDs case-insensitively', async () => {
+  mocks.exec.mockResolvedValue({ stdout: sessionListJson([first.toUpperCase()]), stderr: '' });
+  expect(await kiroSessionExists('/project', first)).toBe(true);
+});
+
+it('does not treat stderr text or a failed command as a session', async () => {
   mocks.exec.mockResolvedValueOnce({ stdout: '', stderr: `diagnostic ${first}` }).mockRejectedValueOnce(new Error('failed'));
   expect(await kiroSessionExists('/project', first)).toBeUndefined();
   expect(await kiroSessionExists('/project', first)).toBeUndefined();

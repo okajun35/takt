@@ -140,7 +140,8 @@ describe('KiroProvider integration', () => {
       'chat',
       '--no-interactive',
       '--agent-engine',
-      'v2',
+      'v3',
+      '--trust-workspace',
       '--output-format',
       'stream-json',
       '--trust-tools=read,grep,write,shell',
@@ -201,7 +202,7 @@ describe('KiroProvider integration', () => {
       'utf-8',
     );
 
-    const uuid = '123e4567-e89b-12d3-a456-426614174000';
+    const sessionId = 'sess_123e4567-e89b-12d3-a456-426614174000';
     mockSpawn
       .mockImplementationOnce(() => {
         const child = createMockChildProcess();
@@ -214,7 +215,9 @@ describe('KiroProvider integration', () => {
       .mockImplementationOnce(() => {
         const child = createMockChildProcess();
         queueMicrotask(() => {
-          child.stderr.emit('data', Buffer.from(`${uuid}  updated just now`, 'utf-8'));
+          child.stdout.emit('data', Buffer.from(JSON.stringify([
+            { cwd: testDir, sessions: [{ sessionId, source: 'v3' }], complete: true },
+          ]), 'utf-8'));
           child.emit('close', 0, null);
         });
         return child;
@@ -230,7 +233,7 @@ describe('KiroProvider integration', () => {
 
     expect(result.status).toBe('done');
     expect(result.content).toBe('turn one result');
-    expect(result.sessionId).toBe(uuid);
+    expect(result.sessionId).toBe(sessionId);
     expect(mockSpawn).toHaveBeenCalledTimes(2);
 
     const [, secondArgs, secondOptions] = mockSpawn.mock.calls[1] as [
@@ -238,7 +241,7 @@ describe('KiroProvider integration', () => {
       string[],
       { cwd?: string },
     ];
-    expect(secondArgs).toEqual(['chat', '--list-sessions']);
+    expect(secondArgs).toEqual(['chat', '--list-sessions', '--format', 'json']);
     expect(secondOptions.cwd).toBe(testDir);
   });
 

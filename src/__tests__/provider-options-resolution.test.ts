@@ -668,6 +668,37 @@ describe('resolveEffectiveProviderOptions', () => {
     )).toBe('step');
   });
 
+  it('kiro.mode は step > persona > config の優先で解決される', () => {
+    expect(resolveEffectiveProviderOptions(
+      'project',
+      undefined,
+      { kiro: { mode: 'default' } },
+      { kiro: { mode: 'spec' } },
+      { kiro: { mode: 'default' } },
+    )).toEqual({
+      kiro: { mode: 'spec' },
+    });
+
+    expect(resolveEffectiveProviderOptions(
+      'project',
+      undefined,
+      { kiro: { mode: 'spec' } },
+      undefined,
+      { kiro: { mode: 'default' } },
+    )).toEqual({
+      kiro: { mode: 'default' },
+    });
+
+    expect(resolveProviderOptionSource(
+      'kiro.mode',
+      { kiro: { mode: 'spec' } },
+      [],
+      { kiro: { mode: 'default' } },
+      undefined,
+      'project',
+    )).toBe('step');
+  });
+
   it('kiro.effort のみ指定でも結果は undefined にならない', () => {
     const result = resolveEffectiveProviderOptions(
       'global',
@@ -1248,6 +1279,7 @@ describe('providerOptionsContract', () => {
       'provider_options.copilot.guards.call_timeout_ms',
       'provider_options.kiro.agent',
       'provider_options.kiro.effort',
+      'provider_options.kiro.mode',
       'provider_options.kiro.guards.call_timeout_ms',
       'provider_options.cursor.guards.call_timeout_ms',
       'provider_options.deepseek_harness.base_url',
@@ -1290,6 +1322,7 @@ describe('providerOptionsContract', () => {
     expect(PROVIDER_OPTIONS_TRACE_PATHS).toContain('provider_options.kiro');
     expect(PROVIDER_OPTIONS_TRACE_PATHS).toContain('provider_options.kiro.agent');
     expect(PROVIDER_OPTIONS_TRACE_PATHS).toContain('provider_options.kiro.effort');
+    expect(PROVIDER_OPTIONS_TRACE_PATHS).toContain('provider_options.kiro.mode');
     expect(PROVIDER_OPTIONS_TRACE_PATHS).toContain('provider_options.kiro.guards.call_timeout_ms');
     expect(PROVIDER_OPTIONS_TRACE_PATHS).toContain('provider_options.cursor.guards.call_timeout_ms');
     expect(PROVIDER_OPTIONS_TRACE_PATHS).toContain('provider_options.deepseek_harness');

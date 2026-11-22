@@ -892,10 +892,11 @@ export function denormalizeProviderOptions(
         : {}),
     };
   }
-  if (providerOptions.kiro?.agent !== undefined || providerOptions.kiro?.effort !== undefined || providerOptions.kiro?.guards?.callTimeoutMs !== undefined) {
+  if (providerOptions.kiro?.agent !== undefined || providerOptions.kiro?.effort !== undefined || providerOptions.kiro?.mode !== undefined || providerOptions.kiro?.guards?.callTimeoutMs !== undefined) {
     raw.kiro = {
       ...(providerOptions.kiro.agent !== undefined ? { agent: providerOptions.kiro.agent } : {}),
       ...(providerOptions.kiro.effort !== undefined ? { effort: providerOptions.kiro.effort } : {}),
+      ...(providerOptions.kiro.mode !== undefined ? { mode: providerOptions.kiro.mode } : {}),
       ...(providerOptions.kiro.guards?.callTimeoutMs !== undefined
         ? { guards: { call_timeout_ms: providerOptions.kiro.guards.callTimeoutMs } }
         : {}),

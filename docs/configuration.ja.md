@@ -332,6 +332,7 @@ ignore_exceed: false          # takt run / takt watch で --ignore-exceed 相当
 #   kiro:
 #     agent: my-default-agent
 #     effort: medium
+#     mode: spec          # Kiro CLI V3 エージェントモード: default または spec（agent 指定が優先）
 #   pi:
 #     extensions: [npm:pi-fff]
 #     no_skills: true
@@ -896,7 +897,7 @@ workflow の `promotion` entry は `runtime.yaml` で選択された target ladd
 
 **GitHub Copilot CLI** は `model` を `copilot --model <model>` にそのまま渡します。省略時は Copilot CLI のデフォルトが使用されます。
 
-**Kiro CLI** は `model` を `kiro-cli chat --model <model>` にそのまま渡します。省略時は Kiro CLI のデフォルトが使用されます。
+**Kiro CLI** は `model` を `kiro-cli chat --model <model>` にそのまま渡します。省略時は Kiro CLI のデフォルトが使用されます。TAKT は常に V3 エンジンで起動します（`kiro-cli chat --no-interactive --agent-engine v3 --trust-workspace`）。ワークスペースの `.kiro` 配下の agent・hook・MCP 設定は対話プロンプトなしで読み込まれ、セッション ID は `sess_<uuid>` 形式です。`provider_options.kiro.mode` で V3 のモード（`default` または `spec`）を選択でき、`provider_options.kiro.agent` 指定があればモードより優先されます。
 
 **Devin CLI** は `model` を `devin acp --model <model>` に渡します（例: `swe-2-max`、`swe-2-high`、`swe-2-medium`）。ACP session はその名前を `model` と `thought_level` の config option に解決し、解決・適用できない名前はデフォルトへフォールバックせずエラーになります。この検証は新規 session のみに適用され、再開 session は作成時のモデルを維持するため、指定された名前の再解決は行いません。省略時はユーザーの Devin config に設定されたデフォルトモデルが使用されます。
 
@@ -1674,7 +1675,7 @@ provider option は対応する `TAKT_PROVIDER_OPTIONS_*` 環境変数でも指�
 | Codex の権限と Skill | `TAKT_PROVIDER_OPTIONS_CODEX_PERMISSION_CONTROL=codex`、`TAKT_PROVIDER_OPTIONS_CODEX_SKILLS_REPO=true`、`TAKT_PROVIDER_OPTIONS_CODEX_SKILLS_USER=true` |
 | Claude の Skill | `TAKT_PROVIDER_OPTIONS_CLAUDE_SKILLS_ENABLED=true` |
 | Claude terminal | `TAKT_PROVIDER_OPTIONS_CLAUDE_TERMINAL_BACKEND=tmux`、`TAKT_PROVIDER_OPTIONS_CLAUDE_TERMINAL_TIMEOUT_MS=900000`、`TAKT_PROVIDER_OPTIONS_CLAUDE_TERMINAL_KEEP_SESSION=false`、`TAKT_PROVIDER_OPTIONS_CLAUDE_TERMINAL_TRANSCRIPT_POLL_INTERVAL_MS=500` |
-| Kiro の agent と effort | `TAKT_PROVIDER_OPTIONS_KIRO_AGENT=planner-agent`、`TAKT_PROVIDER_OPTIONS_KIRO_EFFORT=medium` |
+| Kiro の agent・effort・mode | `TAKT_PROVIDER_OPTIONS_KIRO_AGENT=planner-agent`、`TAKT_PROVIDER_OPTIONS_KIRO_EFFORT=medium`、`TAKT_PROVIDER_OPTIONS_KIRO_MODE=spec` |
 | Pi の推論・リソース | `TAKT_PROVIDER_OPTIONS_PI_THINKING_LEVEL=high`、`TAKT_PROVIDER_OPTIONS_PI_EXTENSIONS='["npm:pi-fff"]'`、`TAKT_PROVIDER_OPTIONS_PI_NO_EXTENSIONS=true`、`TAKT_PROVIDER_OPTIONS_PI_NO_SKILLS=true`、`TAKT_PROVIDER_OPTIONS_PI_NO_PROMPT_TEMPLATES=true`、`TAKT_PROVIDER_OPTIONS_PI_NO_THEMES=true`、`TAKT_PROVIDER_OPTIONS_PI_NO_CONTEXT_FILES=true` |
 | Pi の system prompt | `TAKT_PROVIDER_OPTIONS_PI_SYSTEM_PROMPT_MODE=append` または `replace` |
 

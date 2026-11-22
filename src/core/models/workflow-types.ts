@@ -50,6 +50,7 @@ export type {
   ClaudeEffort,
   CopilotEffort,
   KiroEffort,
+  KiroMode,
   ClaudeSandboxSettings,
   ClaudePermissionsOptions,
   ProviderGuardOptions,
