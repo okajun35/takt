@@ -999,16 +999,27 @@ export function resolveEffectiveProviderOptions(
 ): StepProviderOptions | undefined {
   if (!resolvedConfigOptions) {
     const merged = mergeProviderOptions(personaOptions, stepOptions);
+    // Without a config layer there is no user-managed origin to grant
+    // `trust_workspace` — workflow layers can refuse it but never grant it.
+    const effective = merged?.kiro?.trustWorkspace === true
+      ? stripKiroTrustGrant(merged)
+      : merged;
     if (resolvedProvider === 'codex') {
-      assertCodexConfigProfilePermissionControl(merged?.codex);
+      assertCodexConfigProfilePermissionControl(effective?.codex);
     }
-    return merged;
+    return effective;
   }
   if (!personaOptions && !stepOptions) {
+    const effective = resolvedConfigOptions.kiro?.trustWorkspace === true
+      && !isDenyWinsGrantOrigin(
+        resolveProviderOptionOrigin(originResolver, 'kiro.trustWorkspace', source),
+      )
+      ? stripKiroTrustGrant(resolvedConfigOptions)
+      : resolvedConfigOptions;
     if (resolvedProvider === 'codex') {
-      assertCodexConfigProfilePermissionControl(resolvedConfigOptions.codex);
+      assertCodexConfigProfilePermissionControl(effective?.codex);
     }
-    return resolvedConfigOptions;
+    return effective;
   }
 
   const claudeSandbox = {
@@ -1216,20 +1227,20 @@ export function resolveEffectiveProviderOptions(
     stepOptions?.kiro?.mode,
     resolveProviderOptionOrigin(originResolver, 'kiro.mode', source),
   );
-  // Same deny-wins rule as the config merge: an explicit false in any layer
-  // (user config, workflow step, persona) vetoes workspace trust — granting it
-  // runs repo-controlled hooks/MCP processes, so refusal must not be
-  // overridable by a more specific layer.
+  // Deny-wins: an explicit false in any layer vetoes the flag. A `true`
+  // grants it only when the config leaf itself comes from a user-managed
+  // origin (env/CLI or the user's global config) — the flag runs
+  // repo-controlled workspace hooks/MCP processes, so a checked-in
+  // project/workflow value must not be able to grant it.
   const kiroTrustWorkspace = resolvedConfigOptions.kiro?.trustWorkspace === false
     || personaOptions?.kiro?.trustWorkspace === false
     || stepOptions?.kiro?.trustWorkspace === false
     ? false
-    : selectProviderValue(
-        resolvedConfigOptions.kiro?.trustWorkspace,
-        personaOptions?.kiro?.trustWorkspace,
-        stepOptions?.kiro?.trustWorkspace,
-        resolveProviderOptionOrigin(originResolver, 'kiro.trustWorkspace', source),
-      );
+    : isDenyWinsGrantOrigin(
+          resolveProviderOptionOrigin(originResolver, 'kiro.trustWorkspace', source),
+        ) && resolvedConfigOptions.kiro?.trustWorkspace === true
+      ? true
+      : undefined;
   const deepseekHarnessBaseUrl = selectProviderValueByScope(
     resolvedConfigOptions.deepseekHarness?.baseUrl,
     personaOptions?.deepseekHarness?.baseUrl,
@@ -1789,6 +1800,31 @@ const DENY_WINS_PROVIDER_OPTION_PATHS: ReadonlySet<string> = new Set([
   'kiro.trustWorkspace',
 ]);
 
+/**
+ * Origins that may grant a deny-wins option's `true`. Granting
+ * `kiro.trustWorkspace` runs repo-controlled workspace hooks/MCP processes, so
+ * only user-managed configuration — env/CLI overrides or the user's global
+ * config — can supply a grant; a `true` from project config or any workflow
+ * layer (step, persona, routing, promotion) is repo-controlled and ignored.
+ * `false` is honored from every layer (deny-wins).
+ */
+export function isDenyWinsGrantOrigin(origin: ProviderOptionsTraceOrigin): boolean {
+  return origin === 'env' || origin === 'cli' || origin === 'global';
+}
+
+/** Remove a non-grantable `kiro.trustWorkspace: true`, dropping empty shells. */
+function stripKiroTrustGrant(options: StepProviderOptions): StepProviderOptions | undefined {
+  const result: StepProviderOptions = { ...options };
+  const restKiro = { ...options.kiro };
+  delete restKiro.trustWorkspace;
+  if (Object.keys(restKiro).length > 0) {
+    result.kiro = restKiro;
+  } else {
+    delete result.kiro;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
 export function isFilePreferredProviderOptionPath(path: string): boolean {
   return FILE_PREFERRED_PROVIDER_OPTION_PATHS.has(path);
 }
@@ -1846,6 +1882,11 @@ export function resolveProviderOptionSource(
       }
     }
     if (configValue === false) return originToResolutionSource(origin);
+    // A `true` takes effect (and is attributable) only when the config leaf
+    // comes from a user-managed origin — project/workflow layers cannot grant.
+    return configValue === true && isDenyWinsGrantOrigin(origin)
+      ? originToResolutionSource(origin)
+      : undefined;
   }
 
   if (

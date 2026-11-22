@@ -143,7 +143,7 @@ describe('KiroProvider integration', () => {
       'v3',
       '--output-format',
       'stream-json',
-      '--trust-tools=read,grep,write,shell',
+      '--trust-tools=read_file,list_directory,file_search,grep_search,fs_write,fs_append,str_replace,run_command,execute_pwsh,execute_bash',
       '--resume-id',
       'sess_chain',
     ]);

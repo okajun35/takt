@@ -613,7 +613,70 @@ describe('resolveProviderOptionsWithTrace', () => {
     );
 
     expect(resolved.value?.kiro?.trustWorkspace).toBe(false);
+    // 拒否側レイヤーが帰属する（true を書いた project ではなく global）。
+    expect(resolved.originResolver('kiro.trustWorkspace')).toBe('global');
     expect(effective?.kiro?.trustWorkspace).toBe(false);
+  });
+
+  // trust_workspace:true の付与はユーザー管理レイヤー（global config / env /
+  // CLI）から来た場合のみ効く。リポジトリにコミットされる project config の
+  // true は共有ファイルが自分自身にワークスペース信頼を与えられないよう無視
+  // する（false はどのレイヤーでも拒否として効く）。
+  it('project の kiro.trust_workspace: true は付与にならないが global/env の true は付与になる', () => {
+    const configDir = getProjectConfigDir(projectDir);
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, 'config.yaml'),
+      ['provider_options:', '  kiro:', '    trust_workspace: true'].join('\n'),
+      'utf-8',
+    );
+
+    const projectOnly = resolveProviderOptionsWithTrace(projectDir);
+    expect(resolveEffectiveProviderOptions(
+      projectOnly.source,
+      projectOnly.originResolver,
+      projectOnly.value,
+      { kiro: { trustWorkspace: true } },
+    )?.kiro?.trustWorkspace).toBeUndefined();
+
+    // global の付与を検証するため project 側の trust_workspace は外す
+    // （両方に true があると帰属が project になり付与が否定される）。
+    writeFileSync(
+      join(configDir, 'config.yaml'),
+      ['language: en'].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(
+      globalConfigPath,
+      [
+        'language: en',
+        'provider_options:',
+        '  kiro:',
+        '    trust_workspace: true',
+      ].join('\n'),
+      'utf-8',
+    );
+    invalidateGlobalConfigCache();
+    invalidateAllResolvedConfigCache();
+
+    const globalGranted = resolveProviderOptionsWithTrace(projectDir);
+    expect(resolveEffectiveProviderOptions(
+      globalGranted.source,
+      globalGranted.originResolver,
+      globalGranted.value,
+      undefined,
+    )?.kiro?.trustWorkspace).toBe(true);
+
+    invalidateGlobalConfigCache();
+    invalidateAllResolvedConfigCache();
+    process.env.TAKT_PROVIDER_OPTIONS_KIRO_TRUST_WORKSPACE = 'true';
+    const envGranted = resolveProviderOptionsWithTrace(projectDir);
+    expect(resolveEffectiveProviderOptions(
+      envGranted.source,
+      envGranted.originResolver,
+      envGranted.value,
+      undefined,
+    )?.kiro?.trustWorkspace).toBe(true);
   });
 
   // ファイル側の trust_workspace:false と env の true が同一設定ファイルの

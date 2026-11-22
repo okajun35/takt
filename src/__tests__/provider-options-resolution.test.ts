@@ -754,6 +754,51 @@ describe('resolveEffectiveProviderOptions', () => {
       { kiro: { trustWorkspace: true } },
       { kiro: { trustWorkspace: true } },
       undefined,
+    )).toBeUndefined();
+  });
+
+  // trust_workspace はワークスペース定義の hooks/MCP の実行を許可する付与なので、
+  // リポジトリにコミットされる設定（project config / step / persona / promotion）
+  // は自分自身に信頼を与えられない。true の付与が効くのはユーザー管理のレイヤー
+  // （global config / env / CLI オーバーライド）だけで、false はどのレイヤーでも
+  // 拒否として効く。
+  it('kiro.trustWorkspace の true が効くのはユーザー管理のレイヤーだけ', () => {
+    // project source の config true は付与にならない（step/persona の true も同様）。
+    expect(resolveEffectiveProviderOptions(
+      'project',
+      undefined,
+      { kiro: { trustWorkspace: true } },
+      { kiro: { trustWorkspace: true } },
+      { kiro: { trustWorkspace: true } },
+    )).toBeUndefined();
+
+    // ただし global config の true も step の false の拒否は覆せない。
+    expect(resolveEffectiveProviderOptions(
+      'global',
+      undefined,
+      { kiro: { trustWorkspace: true } },
+      { kiro: { trustWorkspace: false } },
+      undefined,
+    )).toEqual({
+      kiro: { trustWorkspace: false },
+    });
+    expect(resolveEffectiveProviderOptions(
+      'global',
+      undefined,
+      { kiro: { trustWorkspace: true } },
+      undefined,
+      { kiro: { trustWorkspace: true } },
+    )).toEqual({
+      kiro: { trustWorkspace: true },
+    });
+
+    // env/CLI origin の true もユーザー管理なので付与される。
+    expect(resolveEffectiveProviderOptions(
+      'project',
+      (path: string) => (path === 'kiro.trustWorkspace' ? 'env' : 'local'),
+      { kiro: { trustWorkspace: true } },
+      { kiro: { trustWorkspace: true } },
+      undefined,
     )).toEqual({
       kiro: { trustWorkspace: true },
     });
@@ -864,6 +909,25 @@ describe('resolveEffectiveProviderOptions', () => {
     );
     expect(filteredGrant.providerOptions?.kiro?.effort).toBe('low');
     expect(filteredGrant.providerOptionsSources?.['kiro.effort']).toBe('env');
+  });
+
+  // promotion はワークフロー定義由来のレイヤーなので trust_workspace の true
+  // 付与はできない（ワークフローファイルが自分自身に信頼を与えられないよう）。
+  // false の拒否だけが promotion を通過する。
+  it('promotion の kiro.trustWorkspace: true はフィルタで落ちる', () => {
+    const granted = resolvePromotionProviderOptions(
+      { providerOptions: undefined, providerOptionsSources: {} },
+      { kiro: { trustWorkspace: true } },
+    );
+    expect(granted.providerOptions?.kiro?.trustWorkspace).toBeUndefined();
+    expect(granted.providerOptionsSources?.['kiro.trustWorkspace']).toBeUndefined();
+
+    const refused = resolvePromotionProviderOptions(
+      { providerOptions: undefined, providerOptionsSources: {} },
+      { kiro: { trustWorkspace: false } },
+    );
+    expect(refused.providerOptions?.kiro?.trustWorkspace).toBe(false);
+    expect(refused.providerOptionsSources?.['kiro.trustWorkspace']).toBe('promotion');
   });
 
   it('kiro.effort のみ指定でも結果は undefined にならない', () => {

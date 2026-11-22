@@ -34,15 +34,25 @@ function buildPrompt(prompt: string, systemPrompt?: string): string {
   return `${systemPrompt}\n\n${prompt}`;
 }
 
+// V3 tool IDs. V2 names are only accepted since Kiro CLI 3.3.0 and each name
+// grants its whole permission capability — `write` would also trust
+// delete_file and str_replace. `delete_file` is deliberately absent: V2's
+// fs_write had no delete operation, so the previous edit scope never covered
+// file deletion. `run_command`/`execute_pwsh` are the V3 shell ids;
+// `execute_bash` is listed in the V3 catalog as well — unmatched names are
+// ignored, so all three are safe to name.
+const KIRO_V3_READONLY_TRUST_TOOLS = 'read_file,list_directory,file_search,grep_search';
+const KIRO_V3_EDIT_TRUST_TOOLS = `${KIRO_V3_READONLY_TRUST_TOOLS},fs_write,fs_append,str_replace,run_command,execute_pwsh,execute_bash`;
+
 function buildTrustArgs(options: KiroCallOptions): string[] {
   if (options.permissionMode === 'full') {
     return ['--trust-all-tools'];
   }
   if (options.permissionMode === 'edit') {
-    return ['--trust-tools=read,grep,write,shell'];
+    return [`--trust-tools=${KIRO_V3_EDIT_TRUST_TOOLS}`];
   }
   if (options.permissionMode === 'readonly') {
-    return ['--trust-tools=read,grep'];
+    return [`--trust-tools=${KIRO_V3_READONLY_TRUST_TOOLS}`];
   }
   return [];
 }
@@ -490,13 +500,17 @@ export class KiroClient {
       const { stdout } = await execKiro(args, effectiveOptions, promptText);
       const parsed = parseKiroOutput(stdout);
       if ('error' in parsed) {
+        // Structured failure diagnostics go through the same API-key masking
+        // as process errors — a runError message can embed credential
+        // material, and the stream and the response share the masked value.
+        const errorMessage = redactedTrimmedDetail(parsed.error, effectiveKiroApiKey);
         emitStructuredEvents(options.onStream, parsed.events ?? []);
-        emitResult(options, '', false, parsed.error, options.sessionId);
+        emitResult(options, '', false, errorMessage, options.sessionId);
         return {
           persona: agentType,
           status: 'error',
-          content: parsed.error,
-          error: parsed.error,
+          content: errorMessage,
+          error: errorMessage,
           timestamp: new Date(),
           sessionId: options.sessionId,
         };
@@ -537,7 +551,23 @@ export class KiroClient {
       };
     } catch (rawError) {
       const error = rawError as KiroExecError;
-      const message = classifyExecutionError(error, effectiveOptions);
+      let message = classifyExecutionError(error, effectiveOptions);
+      // A non-zero exit can still carry the ACP stream on stdout — a
+      // structured runError followed by exit 1. Deliver the events it
+      // collected before the failure result, and prefer the run's own
+      // diagnostic (masked) over the exit-code summary when one exists.
+      // Spawn failures and aborts keep their classified message.
+      const partial = typeof error.stdout === 'string' && error.stdout.length > 0
+        ? parseKiroOutput(error.stdout)
+        : undefined;
+      if (partial !== undefined) {
+        if (partial.events !== undefined && partial.events.length > 0) {
+          emitStructuredEvents(options.onStream, partial.events);
+        }
+        if ('error' in partial && !options.abortSignal?.aborted) {
+          message = redactedTrimmedDetail(partial.error, effectiveKiroApiKey);
+        }
+      }
       emitResult(options, '', false, message, options.sessionId);
       return {
         persona: agentType,

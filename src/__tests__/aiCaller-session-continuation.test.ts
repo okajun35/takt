@@ -53,6 +53,69 @@ describe('interactive session continuation refusal', () => {
     });
   });
 
+  it('does not auto-retry a failed session call after a tool already ran', async () => {
+    // The first attempt executed a tool, so resending the same prompt to a
+    // fresh session could repeat the write/command side effects. A failed
+    // call with no tool activity may still retry without the session.
+    const providerCall = vi.fn<ProviderAgent['call']>().mockImplementation(async (_prompt, callOptions) => {
+      callOptions.onStream?.({ type: 'tool_use', data: { id: 'tool-1', tool: 'Write', input: {} } });
+      return {
+        persona: 'interactive',
+        status: 'error',
+        content: '',
+        error: 'session exploded after the write',
+        sessionId: 'stale-session',
+        timestamp: new Date(),
+      };
+    });
+    const provider = makeProvider({ setup: () => ({ call: providerCall }) });
+
+    const result = await callAIWithRetry(
+      'apply the edit',
+      'system prompt',
+      [],
+      '/workspace',
+      makeSessionContext({ provider, providerType: 'kiro', sessionId: 'stale-session' }),
+      { outputMode: 'silent', persistSession: false },
+    );
+
+    expect(providerCall).toHaveBeenCalledOnce();
+    expect(result.result?.success).toBe(false);
+  });
+
+  it('still retries a failed session call that produced no tool activity', async () => {
+    const providerCall = vi.fn<ProviderAgent['call']>()
+      .mockResolvedValueOnce({
+        persona: 'interactive',
+        status: 'error',
+        content: '',
+        error: 'session exploded before doing anything',
+        sessionId: 'stale-session',
+        timestamp: new Date(),
+      })
+      .mockResolvedValueOnce({
+        persona: 'interactive',
+        status: 'done',
+        content: 'fresh answer',
+        sessionId: 'fresh-session',
+        timestamp: new Date(),
+      });
+    const provider = makeProvider({ setup: () => ({ call: providerCall }) });
+
+    const result = await callAIWithRetry(
+      'say hi',
+      'system prompt',
+      [],
+      '/workspace',
+      makeSessionContext({ provider, providerType: 'kiro', sessionId: 'stale-session' }),
+      { outputMode: 'silent', persistSession: false },
+    );
+
+    expect(providerCall).toHaveBeenCalledTimes(2);
+    expect(providerCall.mock.calls[1]?.[1].sessionId).toBeUndefined();
+    expect(result.result).toMatchObject({ success: true, content: 'fresh answer' });
+  });
+
   it('reports an empty successful provider answer without retrying the original prompt fresh', async () => {
     const providerCall = vi.fn<ProviderAgent['call']>().mockImplementation(async (_prompt, callOptions) => {
       callOptions.onStream?.({ type: 'tool_use', data: { id: 'tool-1', tool: 'Bash', input: {} } });

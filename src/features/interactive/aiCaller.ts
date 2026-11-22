@@ -495,11 +495,14 @@ export async function callAIWithRetry(
       && !success
       && !emptyResponse
       && canRetrySession
+      // After a tool ran, resending the same prompt to a fresh session can
+      // repeat side effects (writes, commands). Only retry untouched prompts.
+      && !firstAttempt.usedTools
       // DeepSeek has no stale-session recovery. Retrying an unsupported
       // constraint without an ID cannot make that same constraint supported.
       && ctx.providerType !== 'deepseek-harness'
       && (response.failureCategory !== AGENT_FAILURE_CATEGORIES.SESSION_CONTINUATION_UNSUPPORTED
-        || (rejectedSession && !firstAttempt.usedTools))
+        || rejectedSession)
       && ctx.effort === undefined
       && ctx.disableSessionRetry !== true) {
       log.info('Session invalid, retrying without session');

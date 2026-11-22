@@ -270,7 +270,7 @@ describe('callKiro', () => {
     });
 
     const [, args] = mockSpawn.mock.calls[0] as [string, string[]];
-    expect(args).toContain('--trust-tools=read,grep,write,shell');
+    expect(args).toContain('--trust-tools=read_file,list_directory,file_search,grep_search,fs_write,fs_append,str_replace,run_command,execute_pwsh,execute_bash');
     expect(args).not.toContain('--trust-all-tools');
   });
 
@@ -286,8 +286,8 @@ describe('callKiro', () => {
     });
 
     const [, args] = mockSpawn.mock.calls[0] as [string, string[]];
-    expect(args).toContain('--trust-tools=read,grep');
-    expect(args).not.toContain('--trust-tools=read,grep,write,shell');
+    expect(args).toContain('--trust-tools=read_file,list_directory,file_search,grep_search');
+    expect(args).not.toContain('--trust-tools=read_file,list_directory,file_search,grep_search,fs_write,fs_append,str_replace,run_command,execute_pwsh,execute_bash');
   });
 
   it('Given no permission mode, When called, Then does not add Kiro trust flags', async () => {
@@ -552,7 +552,7 @@ describe('callKiro', () => {
       'v3',
       '--output-format',
       'stream-json',
-      '--trust-tools=read,grep',
+      '--trust-tools=read_file,list_directory,file_search,grep_search',
     ]);
     expect(child.stdin.write).toHaveBeenCalledWith('- fix the Kiro provider');
   });
@@ -629,7 +629,7 @@ describe('callKiro', () => {
       'v3',
       '--output-format',
       'stream-json',
-      '--trust-tools=read,grep',
+      '--trust-tools=read_file,list_directory,file_search,grep_search',
     ]);
     expect(child.stdin.write).toHaveBeenCalledWith('inspect & whoami | cat');
     expect(options.shell).toBeUndefined();
@@ -805,7 +805,7 @@ describe('callKiro', () => {
 
     const [, args] = mockSpawn.mock.calls[0] as [string, string[]];
     expect(args).not.toContain('--trust-workspace');
-    expect(args).toContain('--trust-tools=read,grep');
+    expect(args).toContain('--trust-tools=read_file,list_directory,file_search,grep_search');
   });
 
   it('Given no agent option, When called, Then does not add an --agent flag', async () => {
@@ -1912,6 +1912,75 @@ describe('callKiro with real kiro-cli ACP stream-json payload', () => {
     expect(emitted).toEqual(['tool_use', 'tool_result', 'result']);
     const resultEvent = onStream.mock.calls.at(-1)?.[0] as { data: { success: boolean } };
     expect(resultEvent.data.success).toBe(false);
+  });
+
+  // kiro-cli は構造化エラーを stdout に書いたあと終了コード 1 で終わることが
+  // ある。stderr 側の終了コード要約より、収集済みの ACP イベントと runError の
+  // 診断を優先して届ける（exit-code のみだとツール実行の記録が消える）。
+  it('Given a non-zero exit with an ACP runError on stdout, When called, Then emits the collected events before the structured failure', async () => {
+    mockSpawnWithScenario({
+      stdout: [
+        JSON.stringify({ type: 'runStarted', data: { sessionId, engine: 'v3' } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call', toolCallId: 'tc-1', title: 'Read File', kind: 'read', rawInput: { path: 'a.ts' } } } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call_update', toolCallId: 'tc-1', status: 'completed', rawOutput: { message: 'file body' } } } }),
+        JSON.stringify({ type: 'runError', data: { sessionId, stage: 'model', message: 'Model does not exist', errorType: 'InvalidModel' } }),
+        '',
+      ].join('\n'),
+      code: 1,
+    });
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'read a.ts', { cwd: '/repo', onStream });
+
+    expect(result.status).toBe('error');
+    expect(result.error).toBe('Model does not exist');
+    const emitted = onStream.mock.calls.map(([event]) => event.type);
+    expect(emitted).toEqual(['tool_use', 'tool_result', 'result']);
+    const resultEvent = onStream.mock.calls.at(-1)?.[0] as { data: { success: boolean } };
+    expect(resultEvent.data.success).toBe(false);
+  });
+
+  it('Given a non-zero exit with only text chunks on stdout, When called, Then still reports the exit code detail', async () => {
+    mockSpawnWithScenario({
+      stdout: [
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'partial' } } } }),
+        '',
+      ].join('\n'),
+      code: 1,
+      stderr: 'process died',
+    });
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'say hi', { cwd: '/repo', onStream });
+
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('code 1');
+    const emitted = onStream.mock.calls.map(([event]) => event.type);
+    expect(emitted).toEqual(['text', 'result']);
+  });
+
+  // runError の message には CLI 側がエラー文をそのまま乗せることがあり、
+  // API キーを含み得る。終了コード 0 / 非ゼロのどちらの経路でも、ストリームの
+  // result イベントと返り値の error の両方がマスク済みであることを確認する。
+  it.each([0, 1])('Given a runError message embedding the API key (exit %i), When called, Then the key is masked in the stream and the response', async (code) => {
+    mockSpawnWithScenario({
+      stdout: [
+        JSON.stringify({ type: 'runStarted', data: { sessionId, engine: 'v3' } }),
+        JSON.stringify({ type: 'runError', data: { sessionId, stage: 'auth', message: 'Rejected API key kiro-secret-123 for model', errorType: 'Auth' } }),
+        '',
+      ].join('\n'),
+      code,
+    });
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'say hi', { cwd: '/repo', onStream, kiroApiKey: 'kiro-secret-123' });
+
+    expect(result.status).toBe('error');
+    expect(result.error).not.toContain('kiro-secret-123');
+    expect(result.error).toContain('[REDACTED]');
+    const resultEvent = onStream.mock.calls.at(-1)?.[0] as { data: { error?: string } };
+    expect(resultEvent.data.error).not.toContain('kiro-secret-123');
+    expect(resultEvent.data.error).toContain('[REDACTED]');
   });
 
   it('Given a failed ACP tool_call_update, When called, Then marks the tool_result as an error', async () => {

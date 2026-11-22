@@ -333,7 +333,7 @@ ignore_exceed: false          # takt run / takt watch で --ignore-exceed 相当
 #     agent: my-default-agent
 #     effort: medium
 #     mode: spec          # Kiro CLI V3 エージェントモード: default または spec（agent 指定が優先）
-#     trust_workspace: true  # V3: --trust-workspace を付与（readonly モードでは常に省略。デフォルト: 未設定 = フラグなし）
+#     trust_workspace: true  # V3: --trust-workspace を付与（付与はグローバル設定か env/CLI のみ有効。readonly モードでは常に省略）
 #   pi:
 #     extensions: [npm:pi-fff]
 #     no_skills: true
@@ -898,7 +898,7 @@ workflow の `promotion` entry は `runtime.yaml` で選択された target ladd
 
 **GitHub Copilot CLI** は `model` を `copilot --model <model>` にそのまま渡します。省略時は Copilot CLI のデフォルトが使用されます。
 
-**Kiro CLI** は `model` を `kiro-cli chat --model <model>` にそのまま渡します。省略時は Kiro CLI のデフォルトが使用されます。TAKT は常に V3 エンジンで起動します（`kiro-cli chat --no-interactive --agent-engine v3`）。セッション ID は `sess_<uuid>` 形式です。`provider_options.kiro.mode` で V3 のモード（`default` または `spec`）を選択できます。非対話実行でのモード指定には Kiro CLI 3.5.0 以降が必要で、`provider_options.kiro.agent` の明示指定が優先され、新規セッションでは Kiro 側の `chat.defaultAgent` 設定も `--mode` より優先されます。`provider_options.kiro.trust_workspace: true` を明示した場合のみ `--trust-workspace` を付与し、ワークスペースの `.kiro` 配下の agent・hook・MCP 設定は対話プロンプトなしで読み込まれますが、これらはワークスペース定義の hooks や MCP stdio サーバーを確認なしで実行します。未設定または `false` ではフラグを付与しません（どの設定レイヤーでも `false` が `true` に優先されます。`readonly` 権限モードでは設定に関わらず常に付与しません）。このオプションが制御するのは TAKT が渡すフラグのみです。Kiro CLI で過去に信頼したフォルダーは、チェックアウト外に保存された永続的な信頼を保持して `.kiro` 設定を読み込み続けるため、フラグを付与しないことだけでは `.kiro` 設定が読み込まれないことは保証できません。
+**Kiro CLI** は `model` を `kiro-cli chat --model <model>` にそのまま渡します。省略時は Kiro CLI のデフォルトが使用されます。TAKT は常に V3 エンジンで起動します（`kiro-cli chat --no-interactive --agent-engine v3`）。セッション ID は `sess_<uuid>` 形式です。`provider_options.kiro.mode` で V3 のモード（`default` または `spec`）を選択できます。非対話実行でのモード指定には Kiro CLI 3.5.0 以降が必要で、`provider_options.kiro.agent` の明示指定が優先され、新規セッションでは Kiro 側の `chat.defaultAgent` 設定も `--mode` より優先されます。`provider_options.kiro.trust_workspace: true` をユーザーが管理する設定（グローバルの `~/.takt/config.yaml` または環境変数・CLI オーバーライド）で明示した場合のみ `--trust-workspace` を付与し、ワークスペースの `.kiro` 配下の agent・hook・MCP 設定は対話プロンプトなしで読み込まれますが、これらはワークスペース定義の hooks や MCP stdio サーバーを確認なしで実行します。共有のプロジェクト設定・ワークフローの step/persona オプション・promotion に書かれた `true` は無視されます。リポジトリにコミットされるファイルは信頼を付与できないためです。未設定または `false` ではフラグを付与しません（どの設定レイヤーでも `false` が `true` に優先されます。`readonly` 権限モードでは設定に関わらず常に付与しません）。このオプションが制御するのは TAKT が渡すフラグのみです。Kiro CLI で過去に信頼したフォルダーは、チェックアウト外に保存された永続的な信頼を保持して `.kiro` 設定を読み込み続けるため、フラグを付与しないことだけでは `.kiro` 設定が読み込まれないことは保証できません。
 
 **Devin CLI** は `model` を `devin acp --model <model>` に渡します（例: `swe-2-max`、`swe-2-high`、`swe-2-medium`）。ACP session はその名前を `model` と `thought_level` の config option に解決し、解決・適用できない名前はデフォルトへフォールバックせずエラーになります。この検証は新規 session のみに適用され、再開 session は作成時のモデルを維持するため、指定された名前の再解決は行いません。省略時はユーザーの Devin config に設定されたデフォルトモデルが使用されます。
 

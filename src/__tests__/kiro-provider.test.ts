@@ -204,7 +204,7 @@ describe('KiroProvider', () => {
     );
   });
 
-  it('Given providerOptions.kiro.trustWorkspace, When agent is called, Then passes the flag to callKiro', async () => {
+  it.each([true, false])('Given providerOptions.kiro.trustWorkspace=%s, When agent is called, Then passes the flag to callKiro', async (trustWorkspace) => {
     mockCallKiro.mockResolvedValue(doneResponse('planner'));
 
     const provider = new KiroProvider();
@@ -213,7 +213,7 @@ describe('KiroProvider', () => {
     await agent.call('plan the feature', {
       cwd: '/tmp/work',
       providerOptions: {
-        kiro: { trustWorkspace: false },
+        kiro: { trustWorkspace },
       },
     });
 
@@ -221,7 +221,7 @@ describe('KiroProvider', () => {
       'planner',
       'plan the feature',
       expect.objectContaining({
-        trustWorkspace: false,
+        trustWorkspace,
       }),
     );
   });

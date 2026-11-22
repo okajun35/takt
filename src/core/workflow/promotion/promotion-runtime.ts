@@ -85,9 +85,15 @@ function filterPromotionProviderOptions(
       continue;
     }
     const baseSource = baseSources?.[path];
-    if (
+    if (isDenyWinsProviderOptionPath(path)) {
+      // Deny-wins paths pass refusals through (even over env/CLI bases) but a
+      // promotion can never *grant* — a `true` grant comes only from
+      // user-managed config origins (env/CLI or the user's global config).
+      if (value !== false) {
+        continue;
+      }
+    } else if (
       !isFilePreferredProviderOptionPath(path)
-      && !(isDenyWinsProviderOptionPath(path) && value === false)
       && (baseSource === 'env' || baseSource === 'cli')
     ) {
       continue;
@@ -101,7 +107,6 @@ function filterPromotionProviderOptions(
 }
 
 function resolvePromotionProviderOptionsSources(
-  baseOptions: StepProviderInfo['providerOptions'],
   baseSources: StepProviderInfo['providerOptionsSources'],
   promotionOptions: StepProviderInfo['providerOptions'],
 ): StepProviderInfo['providerOptionsSources'] {
@@ -115,14 +120,6 @@ function resolvePromotionProviderOptionsSources(
   for (const path of PROVIDER_OPTION_PATHS) {
     const value = getProviderOptionValue(promotionOptions, path);
     if (value === undefined) {
-      continue;
-    }
-    if (
-      isDenyWinsProviderOptionPath(path)
-      && value !== false
-      && getProviderOptionValue(baseOptions, path) === false
-    ) {
-      // Deny-wins keeps the base refusal; the source stays the layer that refused.
       continue;
     }
     sources[path] = 'promotion';
@@ -277,7 +274,6 @@ export function resolvePromotionProviderOptions(
   return {
     providerOptions: mergeProviderOptions(baseProviderInfo.providerOptions, filteredPromotionOptions),
     providerOptionsSources: resolvePromotionProviderOptionsSources(
-      baseProviderInfo.providerOptions,
       baseProviderInfo.providerOptionsSources,
       filteredPromotionOptions,
     ),
