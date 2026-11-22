@@ -160,63 +160,63 @@ function redactStreamEvent(event: StreamEvent, kiroApiKey: string | undefined): 
   return { ...event, data: redactEventValue(event.data, kiroApiKey) } as StreamEvent;
 }
 
-// Assistant text arrives as consecutive chunks, and a chunk boundary can split
-// the API key — per-event whole-match redaction would then print the joined
-// secret to the stream. Hold back `key.length - 1` trailing characters (after
-// in-buffer replacement) so a split key is still masked; flush() returns the
-// held tail. A non-text event flushes the buffer first — held-back text must
-// not overtake a following tool event, or progress notes would land in the
-// post-tool answer. A key split across a tool boundary stays unmasked, but its
-// fragments are never contiguous in the stream, so nothing reconstructs it.
-function createTextRedactor(kiroApiKey: string | undefined): {
-  push(text: string): string;
-  flush(): string;
-} {
-  if (!kiroApiKey) {
-    return { push: (text) => text, flush: () => '' };
-  }
-  const hold = kiroApiKey.length - 1;
-  let pending = '';
-  return {
-    push(text: string): string {
-      pending = redactDetail(pending + text, kiroApiKey);
-      const out = pending.slice(0, Math.max(0, pending.length - hold));
-      pending = pending.slice(out.length);
-      return out;
-    },
-    flush(): string {
-      const out = pending;
-      pending = '';
-      return out;
-    },
-  };
-}
-
+// Assistant text arrives as consecutive chunks, and a chunk boundary — or a
+// tool event, since consumers concatenate text across tool events — can split
+// the API key. Per-event whole-match redaction would then leak the joined
+// secret. Compute every match over the joined text up front, then emit each
+// chunk's masked share in its original position: the chunk containing a
+// match's start emits `[REDACTED]`, and overlapping characters are dropped
+// from every chunk the match spans. Event order and non-text payloads are
+// preserved.
 function emitRedactedEvents(
   options: KiroCallOptions,
   events: readonly StreamEvent[],
   kiroApiKey: string | undefined,
 ): void {
-  const textRedactor = createTextRedactor(kiroApiKey);
-  const flushText = () => {
-    const tail = textRedactor.flush();
-    if (tail.length > 0) {
-      options.onStream?.({ type: 'text', data: { text: tail } });
+  const joined = events.map((event) => {
+    const text = (event.data as { text?: unknown } | undefined)?.text;
+    return event.type === 'text' && typeof text === 'string' ? text : '';
+  }).join('');
+  const matches: Array<readonly [number, number]> = [];
+  if (kiroApiKey) {
+    for (let i = joined.indexOf(kiroApiKey); i >= 0; i = joined.indexOf(kiroApiKey, i + kiroApiKey.length)) {
+      matches.push([i, i + kiroApiKey.length]);
     }
-  };
+  }
+
+  let cursor = 0;
+  let nextMatch = 0;
   for (const event of events) {
     if (event.type !== 'text') {
-      flushText();
       options.onStream?.(redactStreamEvent(event, kiroApiKey));
       continue;
     }
-    const text = (event.data as { text?: unknown } | undefined)?.text;
+    const start = cursor;
+    const raw = (event.data as { text?: unknown } | undefined)?.text;
+    const end = start + (typeof raw === 'string' ? raw.length : 0);
+    let out = '';
+    let pos = start;
+    for (let m = nextMatch; m < matches.length && matches[m]![0] < end; m++) {
+      const [matchStart, matchEnd] = matches[m]!;
+      if (matchEnd <= pos) {
+        continue;
+      }
+      out += joined.slice(pos, Math.min(matchStart, end));
+      if (matchStart >= pos) {
+        out += '[REDACTED]';
+      }
+      pos = Math.min(matchEnd, end);
+    }
+    out += joined.slice(pos, end);
+    cursor = end;
+    while (nextMatch < matches.length && matches[nextMatch]![1] <= cursor) {
+      nextMatch++;
+    }
     options.onStream?.({
       ...event,
-      data: { ...event.data, text: textRedactor.push(typeof text === 'string' ? text : '') },
+      data: { ...event.data, text: out },
     } as StreamEvent);
   }
-  flushText();
 }
 
 function redactedTrimmedDetail(value: string | undefined, kiroApiKey: string | undefined): string {

@@ -2196,6 +2196,38 @@ describe('callKiro with real kiro-cli ACP stream-json payload', () => {
     expect(streamedText).toBe('prefix [REDACTED] suffix');
   });
 
+  // キーがツールイベントを挟んで分割されても、配信者は本文をツールを跨いで
+  // 連結するため結合後にキーが再構成される。各断片のある元の位置でマスクする。
+  it('Given the API key split across a tool event boundary, When called, Then masks the joined key in the stream', async () => {
+    mockSpawnWithScenario({
+      stdout: [
+        chunk('prefix kiro-secret-'),
+        toolCallLine,
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call_update', toolCallId: 'tc-1', status: 'completed', rawOutput: { message: 'ok' } } } }),
+        chunk('123 suffix'),
+        JSON.stringify({ type: 'runFinished', data: { sessionId, stopReason: 'end_turn' } }),
+        '',
+      ].join('\n'),
+      code: 0,
+    });
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'say hi', { cwd: '/repo', onStream, kiroApiKey: 'kiro-secret-123', sessionId });
+
+    expect(result.status).toBe('done');
+    // content は最後のツール呼び出し以降の本文のみ — 断片単体はキーにならない。
+    expect(result.content).toBe('123 suffix');
+    expect(JSON.stringify(onStream.mock.calls)).not.toContain('kiro-secret-123');
+    const emitted = onStream.mock.calls.map(([event]) =>
+      event.type === 'text' ? (event.data as { text: string }).text : event.type);
+    const toolUseIndex = emitted.indexOf('tool_use');
+    expect(emitted.slice(0, toolUseIndex).join('')).toBe('prefix [REDACTED]');
+    const streamedText = emitted
+      .filter((item) => !['tool_use', 'tool_result', 'result'].includes(item))
+      .join('');
+    expect(streamedText).toBe('prefix [REDACTED] suffix');
+  });
+
   // キー設定時でも、ツールイベントの前の進捗本文はツールより先に届く —
   // チャンク末尾の保留がツールイベントを追い越してはいけない。
   it('Given an API key and text around a tool call on a successful run, When called, Then progress text reaches the stream before the tool events', async () => {
