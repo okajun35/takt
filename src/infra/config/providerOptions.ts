@@ -1813,7 +1813,7 @@ export function isDenyWinsGrantOrigin(origin: ProviderOptionsTraceOrigin): boole
 }
 
 /** Remove a non-grantable `kiro.trustWorkspace: true`, dropping empty shells. */
-function stripKiroTrustGrant(options: StepProviderOptions): StepProviderOptions | undefined {
+export function stripKiroTrustGrant(options: StepProviderOptions): StepProviderOptions | undefined {
   const result: StepProviderOptions = { ...options };
   const restKiro = { ...options.kiro };
   delete restKiro.trustWorkspace;

@@ -39,6 +39,7 @@ import type { ProviderResolutionSource } from '../../../core/workflow/provider-o
 import {
   mergeProviderOptions,
   normalizeProviderOptions,
+  stripKiroTrustGrant,
   type NormalizeProviderOptionsOptions,
 } from '../providerOptions.js';
 import { resolveCapabilitySets } from '../loaders/capabilitySetResolver.js';
@@ -649,5 +650,11 @@ function resolveProfileProviderOptions(
   const validatedProfileOptions = StepProviderOptionsObjectSchema.parse({ [rawKey]: profile.options });
   const profileOptions = normalizeProviderOptions(validatedProfileOptions, normalizationOptions);
   const mergedOptions = mergeProviderOptions(capabilityOptions, profileOptions);
-  return mergedOptions;
+  // A profile `kiro.trust_workspace: true` grants only from a global
+  // (user-managed) profile — the auto-router, internal agents, companions, and
+  // defaults consume these options directly without the workflow resolver's
+  // grant-origin check, so a project profile's `true` must never reach them.
+  return !isTrustedGlobalProfile && mergedOptions?.kiro?.trustWorkspace === true
+    ? stripKiroTrustGrant(mergedOptions)
+    : mergedOptions;
 }

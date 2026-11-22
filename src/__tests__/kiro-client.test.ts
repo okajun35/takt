@@ -2036,9 +2036,68 @@ describe('callKiro with real kiro-cli ACP stream-json payload', () => {
     expect(result.status).toBe('error');
     expect(result.error).toContain('Kiro authentication failed');
     expect(result.error).toContain('status "failed"');
+    // The guidance must name every accepted credential source so the run
+    // status detail cannot push the setup targets out of the message.
+    for (const target of ['TAKT_KIRO_API_KEY', 'kiro_api_key', 'KIRO_API_KEY']) {
+      expect(result.error).toContain(target);
+    }
     const resultEvent = onStream.mock.calls.at(-1)?.[0] as { data: { error?: string } };
     expect(resultEvent.data.error).toContain('Kiro authentication failed');
     expect(resultEvent.data.error).toContain('status "failed"');
+    for (const target of ['TAKT_KIRO_API_KEY', 'kiro_api_key', 'KIRO_API_KEY']) {
+      expect(resultEvent.data.error).toContain(target);
+    }
+  });
+
+  // stdout が上限を超えて TAKT 側が子プロセスを止めた場合、ACP の終端診断が
+  // 「なぜ止めたか」を上書きしてはいけない。上限超過の説明を保持しつつ
+  // 実行側の終了ステータスを添える。
+  it('Given a non-success runFinished followed by a stdout buffer-limit kill, When called, Then keeps the limit explanation with the run status detail', async () => {
+    mockSpawnWithScenario({
+      stdout: [
+        JSON.stringify({ type: 'runStarted', data: { sessionId, engine: 'v3' } }),
+        JSON.stringify({ type: 'runFinished', data: { sessionId, status: 'failed', finalText: '' } }),
+        '',
+      ].join('\n'),
+      error: { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER', message: 'kiro-cli stdout exceeded buffer limit' },
+    });
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'say hi', { cwd: '/repo', onStream });
+
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('exceeded buffer limit');
+    expect(result.error).toContain('status "failed"');
+    const resultEvent = onStream.mock.calls.at(-1)?.[0] as { data: { error?: string } };
+    expect(resultEvent.data.error).toContain('exceeded buffer limit');
+    expect(resultEvent.data.error).toContain('status "failed"');
+  });
+
+  // 非ゼロ終了時に再配信する構造化イベントは、tool_call の入力や
+  // tool_call_update の出力に埋まった設定済み API キーをマスクして届ける。
+  it('Given ACP tool events embedding the API key on a non-zero exit, When called, Then masks the key inside the streamed events', async () => {
+    mockSpawnWithScenario({
+      stdout: [
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call', toolCallId: 'tc-1', title: 'run_command', kind: 'execute', rawInput: { command: 'echo kiro-secret-123' } } } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call_update', toolCallId: 'tc-1', status: 'completed', rawOutput: { message: 'key was kiro-secret-123' } } } }),
+        JSON.stringify({ type: 'runError', data: { sessionId, stage: 'run', message: 'aborted by user', errorType: 'Abort' } }),
+        '',
+      ].join('\n'),
+      code: 1,
+    });
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'say hi', { cwd: '/repo', onStream, kiroApiKey: 'kiro-secret-123' });
+
+    expect(result.status).toBe('error');
+    const emitted = onStream.mock.calls.map(([event]) => event.type);
+    expect(emitted).toEqual(['tool_use', 'tool_result', 'result']);
+    const toolUse = onStream.mock.calls[0]?.[0] as { data: { id: string; input: Record<string, unknown> } };
+    expect(toolUse.data.id).toBe('tc-1');
+    expect(JSON.stringify(toolUse.data.input)).not.toContain('kiro-secret-123');
+    const toolResult = onStream.mock.calls[1]?.[0] as { data: { id: string; content: string } };
+    expect(toolResult.data.id).toBe('tc-1');
+    expect(toolResult.data.content).toBe('key was [REDACTED]');
   });
 
   // JSONL に解釈できない平文 stdout は API キーを含み得る。失敗経路では

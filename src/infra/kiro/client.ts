@@ -135,6 +135,32 @@ function redactDetail(value: string, kiroApiKey: string | undefined): string {
   return value.split(kiroApiKey).join('[REDACTED]');
 }
 
+// Failure-path re-delivery: collected ACP events may carry the configured API
+// key inside tool_call inputs or tool_call_update outputs. Redact every string
+// payload before the events reach stream subscribers.
+function redactEventValue(value: unknown, kiroApiKey: string): unknown {
+  if (typeof value === 'string') {
+    return redactDetail(value, kiroApiKey);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactEventValue(entry, kiroApiKey));
+  }
+  const record = toRecord(value);
+  if (record === undefined) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(record).map(([key, entry]) => [key, redactEventValue(entry, kiroApiKey)]),
+  );
+}
+
+function redactStreamEvent(event: StreamEvent, kiroApiKey: string | undefined): StreamEvent {
+  if (!kiroApiKey || event.data === undefined) {
+    return event;
+  }
+  return { ...event, data: redactEventValue(event.data, kiroApiKey) } as StreamEvent;
+}
+
 function redactedTrimmedDetail(value: string | undefined, kiroApiKey: string | undefined): string {
   return trimDetail(redactDetail(value ?? '', kiroApiKey));
 }
@@ -574,7 +600,10 @@ export class KiroClient {
         // unredacted secret, and the masked process diagnostic already
         // reports it.
         if (partial.rawText !== true && partial.events !== undefined && partial.events.length > 0) {
-          emitStructuredEvents(options.onStream, partial.events);
+          emitStructuredEvents(
+            options.onStream,
+            partial.events.map((event) => redactStreamEvent(event, effectiveKiroApiKey)),
+          );
         }
         // Only a run-declared terminal diagnostic replaces the process
         // diagnostic — a parser extraction failure (e.g. stdout held only a
@@ -582,9 +611,12 @@ export class KiroClient {
         if ('error' in partial && partial.terminal === true && !options.abortSignal?.aborted) {
           const detail = redactedTrimmedDetail(partial.error, effectiveKiroApiKey);
           if (detail.length > 0) {
-            // Authentication failures keep their setup guidance; the masked
-            // run diagnostic is appended instead of replacing it.
-            message = isAuthenticationError(error) ? `${message} ${detail}` : detail;
+            // The bare exit-code summary is generic enough to replace; specific
+            // classifications (auth setup guidance, output-limit explanation)
+            // keep their message and the run diagnostic is appended instead.
+            message = typeof error.code === 'number' && !isAuthenticationError(error)
+              ? detail
+              : `${message} ${detail}`;
           }
         }
       }
