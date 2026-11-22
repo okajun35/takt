@@ -1351,7 +1351,7 @@ describe('callKiro session ID resolution (issue #781)', () => {
     expect(result.sessionId).toBeUndefined();
   });
 
-  it('Given sessions for multiple workspaces in --list-sessions stdout, When resolving the session ID, Then merges them in listing order', async () => {
+  it('Given sessions for multiple workspaces in --list-sessions stdout, When resolving the session ID, Then ignores other workspaces', async () => {
     mockSpawnSequence([
       { stdout: 'Implementation complete.', code: 0 },
       {
@@ -1366,7 +1366,24 @@ describe('callKiro session ID resolution (issue #781)', () => {
     const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
 
     expect(result.status).toBe('done');
-    expect(result.sessionId).toBe(otherSessionId);
+    expect(result.sessionId).toBe(sessionId);
+  });
+
+  it('Given --list-sessions only lists other workspaces, When resolving the session ID, Then returns undefined', async () => {
+    mockSpawnSequence([
+      { stdout: 'Implementation complete.', code: 0 },
+      {
+        stdout: JSON.stringify([
+          { cwd: '/other', sessions: [{ sessionId: otherSessionId, source: 'v3' }], complete: true },
+        ]),
+        code: 0,
+      },
+    ]);
+
+    const result = await callKiro('coder', 'implement feature', { cwd: '/repo' });
+
+    expect(result.status).toBe('done');
+    expect(result.sessionId).toBeUndefined();
   });
 
   it('Given non-v3 and v3 sessions in --list-sessions stdout, When resolving the session ID, Then prefers the v3 session', async () => {

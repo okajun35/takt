@@ -32,6 +32,18 @@ it('matches session IDs case-insensitively', async () => {
   expect(await kiroSessionExists('/project', first)).toBe(true);
 });
 
+it('does not match sessions listed under another workspace cwd', async () => {
+  mocks.exec.mockResolvedValue({
+    stdout: JSON.stringify([
+      { cwd: '/other', sessions: [{ sessionId: first, source: 'v3' }], complete: true },
+      { cwd: '/project', sessions: [{ sessionId: second, source: 'v3' }], complete: true },
+    ]),
+    stderr: '',
+  });
+  expect(await kiroSessionExists('/project', first)).toBeUndefined();
+  expect(await kiroSessionExists('/project', second)).toBe(true);
+});
+
 it('does not treat stderr text or a failed command as a session', async () => {
   mocks.exec.mockResolvedValueOnce({ stdout: '', stderr: `diagnostic ${first}` }).mockRejectedValueOnce(new Error('failed'));
   expect(await kiroSessionExists('/project', first)).toBeUndefined();

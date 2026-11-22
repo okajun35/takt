@@ -744,6 +744,27 @@ describe('resolveEffectiveProviderOptions', () => {
     });
   });
 
+  it('env origin の kiro.trustWorkspace は step/persona より優先される', () => {
+    expect(resolveEffectiveProviderOptions(
+      'project',
+      (path: string) => (path === 'kiro.trustWorkspace' ? 'env' : 'local'),
+      { kiro: { trustWorkspace: false } },
+      { kiro: { trustWorkspace: true } },
+      { kiro: { trustWorkspace: true } },
+    )).toEqual({
+      kiro: { trustWorkspace: false },
+    });
+
+    expect(resolveProviderOptionSource(
+      'kiro.trustWorkspace',
+      { kiro: { trustWorkspace: true } },
+      [],
+      { kiro: { trustWorkspace: false } },
+      (path: string) => (path === 'kiro.trustWorkspace' ? 'env' : 'local'),
+      'project',
+    )).toBe('env');
+  });
+
   it('kiro.effort のみ指定でも結果は undefined にならない', () => {
     const result = resolveEffectiveProviderOptions(
       'global',
