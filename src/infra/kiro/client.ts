@@ -553,7 +553,9 @@ export class KiroClient {
           sessionId: options.sessionId,
         };
       }
-      const content = parsed.content;
+      // The assembled answer also leaves through `result.data.result` and the
+      // response body — mask it like every other payload on the stream.
+      const content = redactDetail(parsed.content, effectiveKiroApiKey);
       const outputError = content === KIRO_CONTEXT_COMPACTION_NOTICE
         ? KIRO_CONTEXT_COMPACTION_ERROR
         : undefined;

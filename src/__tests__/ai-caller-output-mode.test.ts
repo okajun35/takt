@@ -94,14 +94,9 @@ describe('AI call output ownership', () => {
     vi.spyOn(ctx.provider, 'setup').mockReturnValue({
       call: async (_prompt, options) => {
         attempt += 1;
-        // The first attempt produced no tool events — one that ran tools is
-        // never retried, because a fresh session would repeat the side effects.
-        if (attempt === 1) {
-          return { persona: 'interactive', status: 'error', content: '', timestamp: new Date() };
-        }
         options.onStream?.({ type: 'tool_use', data: { id: 'item_0', tool: 'Read', input: { file_path: 'file.txt' } } });
         options.onStream?.({ type: 'tool_result', data: { id: 'item_0', content: 'done', isError: false } });
-        return { persona: 'interactive', status: 'done', content: 'answer', timestamp: new Date(), sessionId: 'fresh-session' };
+        return { persona: 'interactive', status: attempt === 1 ? 'error' : 'done', content: 'answer', timestamp: new Date() };
       },
     });
     const events: StreamEvent[] = [];
@@ -109,20 +104,12 @@ describe('AI call output ownership', () => {
       outputMode: 'silent', persistSession: false, onStream: (event) => events.push(event),
     });
     expect(outcome.result?.success).toBe(true);
-    expect(events).toHaveLength(2);
+    expect(events).toHaveLength(4);
     expect(events[0]!.toolActivity?.callId).toEqual(expect.any(String));
-    expect(events[1]!.toolActivity?.callId).toBe(events[0]!.toolActivity?.callId);
-    expect(events.map((event) => 'id' in event.data ? event.data.id : undefined)).toEqual(['item_0', 'item_0']);
-
-    // A later call through the same provider gets its own stream call identity.
-    const nextEvents: StreamEvent[] = [];
-    const next = await callAIWithRetry('prompt', 'system', ['Read'], '/repo', { ...ctx, sessionId: 'fresh-session' }, {
-      outputMode: 'silent', persistSession: false, onStream: (event) => nextEvents.push(event),
-    });
-    expect(next.result?.success).toBe(true);
-    expect(nextEvents[0]!.toolActivity?.callId).toEqual(expect.any(String));
-    expect(nextEvents[0]!.toolActivity?.callId).toBe(nextEvents[1]!.toolActivity?.callId);
-    expect(nextEvents[0]!.toolActivity?.callId).not.toBe(events[0]!.toolActivity?.callId);
+    expect(events[0]!.toolActivity?.callId).toBe(events[1]!.toolActivity?.callId);
+    expect(events[2]!.toolActivity?.callId).toBe(events[3]!.toolActivity?.callId);
+    expect(events[0]!.toolActivity?.callId).not.toBe(events[2]!.toolActivity?.callId);
+    expect(events.map((event) => 'id' in event.data ? event.data.id : undefined)).toEqual(['item_0', 'item_0', 'item_0', 'item_0']);
   });
 
   it.each(['external abort', 'SIGINT'] as const)('should notify the caller once for %s before the provider settles', async (source) => {

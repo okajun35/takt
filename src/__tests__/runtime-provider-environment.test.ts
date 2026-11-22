@@ -675,9 +675,10 @@ describe('compileRuntimeProviderEnvironment (auto routing)', () => {
   });
 
   // The auto-router consumes profile providerOptions directly (resolvedExecution
-  // bypasses the workflow resolver's grant-origin check), so a project profile's
-  // `kiro.trust_workspace: true` must never reach it — only global profiles,
-  // which are user-managed, may grant it. `false` refusals pass through.
+  // bypasses the workflow resolver's grant-origin check), and `extends` chains can
+  // mix files of different origins, so `kiro.trust_workspace: true` in a profile
+  // can never grant — grants come only from config.yaml or env/CLI. `false`
+  // refusals pass through.
   const kiroRoutingSection = (trustWorkspace: boolean): RuntimeProviderSection => ({
     defaults: { profile: 'default' },
     profiles: {
@@ -703,12 +704,32 @@ describe('compileRuntimeProviderEnvironment (auto routing)', () => {
     expect(env.autoRouting?.router.providerOptions?.kiro?.trustWorkspace).toBeUndefined();
   });
 
-  it('keeps a global profile router `kiro.trust_workspace: true` grant', () => {
+  it('strips a global profile router `kiro.trust_workspace: true` grant', () => {
     const env = compileRuntimeProviderEnvironment(
       kiroRoutingSection(true),
       originsContext({ default: 'project', router: 'global' }),
     );
-    expect(env.autoRouting?.router.providerOptions).toEqual({ kiro: { trustWorkspace: true } });
+    expect(env.autoRouting?.router.providerOptions?.kiro?.trustWorkspace).toBeUndefined();
+  });
+
+  it('strips a `trust_workspace` grant inherited through an `extends` chain', () => {
+    const section: RuntimeProviderSection = {
+      defaults: { profile: 'default' },
+      profiles: {
+        default: { provider: 'mock', model: 'm-default' },
+        'project-base': { provider: 'kiro', model: 'k-base', options: { trust_workspace: true } },
+        router: { provider: 'kiro', model: 'k-router', extends: 'project-base' },
+      },
+      auto_routing: {
+        router_profile: 'router',
+        pools: { p: { candidates: [{ profile: 'default', tier: 'low' }], fallback_profile: 'default' } },
+      },
+    };
+    const env = compileRuntimeProviderEnvironment(
+      section,
+      originsContext({ default: 'project', 'project-base': 'project', router: 'global' }),
+    );
+    expect(env.autoRouting?.router.providerOptions?.kiro?.trustWorkspace).toBeUndefined();
   });
 
   it('keeps a project profile router `kiro.trust_workspace: false` refusal', () => {
