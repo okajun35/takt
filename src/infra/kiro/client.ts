@@ -224,6 +224,8 @@ interface KiroParsedOutput {
   readonly content: string;
   readonly sessionId?: string;
   readonly events: readonly StreamEvent[];
+  /** Set when the output could not be parsed as JSONL and `events` is raw text. */
+  readonly rawText?: true;
 }
 
 // V3 `sessionUpdate: "tool_call"` → tool_use. The update carries no tool `name`
@@ -413,7 +415,7 @@ function collectKiroStructuredEvents(
 
 function parseKiroOutput(
   stdout: string,
-): KiroParsedOutput | { error: string; events?: StreamEvent[]; terminal?: true } {
+): KiroParsedOutput | { error: string; events?: StreamEvent[]; terminal?: true; rawText?: true } {
   const trimmed = stdout.trim();
   if (!trimmed) {
     return { error: 'kiro-cli returned empty output' };
@@ -422,9 +424,12 @@ function parseKiroOutput(
   const lines = parseValidJsonLines(stdout);
   if (lines.length === 0) {
     const content = cleanKiroOutput(stdout);
+    // `rawText` marks un-parsed process output: on a failure path it is not a
+    // streamable ACP event and may carry unredacted secrets, so the caller
+    // must route it through the masked diagnostic instead.
     return content.length === 0
       ? { error: 'kiro-cli returned empty output' }
-      : { content, events: [{ type: 'text', data: { text: content } }] };
+      : { content, events: [{ type: 'text', data: { text: content } }], rawText: true };
   }
 
   const events: StreamEvent[] = [];
@@ -565,14 +570,22 @@ export class KiroClient {
         ? parseKiroOutput(error.stdout)
         : undefined;
       if (partial !== undefined) {
-        if (partial.events !== undefined && partial.events.length > 0) {
+        // Un-parsed stdout stays out of the stream: it may carry an
+        // unredacted secret, and the masked process diagnostic already
+        // reports it.
+        if (partial.rawText !== true && partial.events !== undefined && partial.events.length > 0) {
           emitStructuredEvents(options.onStream, partial.events);
         }
         // Only a run-declared terminal diagnostic replaces the process
         // diagnostic — a parser extraction failure (e.g. stdout held only a
         // runStarted line) must not hide the exit code and stderr detail.
         if ('error' in partial && partial.terminal === true && !options.abortSignal?.aborted) {
-          message = redactedTrimmedDetail(partial.error, effectiveKiroApiKey);
+          const detail = redactedTrimmedDetail(partial.error, effectiveKiroApiKey);
+          if (detail.length > 0) {
+            // Authentication failures keep their setup guidance; the masked
+            // run diagnostic is appended instead of replacing it.
+            message = isAuthenticationError(error) ? `${message} ${detail}` : detail;
+          }
         }
       }
       emitResult(options, '', false, message, options.sessionId);

@@ -1984,6 +1984,85 @@ describe('callKiro with real kiro-cli ACP stream-json payload', () => {
     expect(resultEvent.data.error).toContain('code 1');
   });
 
+  // ツール完了後に中断した場合も、非ゼロ終了と同様に収集済みの構造化
+  // イベントを失敗 result より先に届ける（実行済み操作の記録を失わない）。
+  it('Given tool events on stdout before an abort, When aborted, Then emits the collected events before the aborted result', async () => {
+    const controller = new AbortController();
+    mockSpawn.mockImplementation(() => {
+      const child = createMockChildProcess();
+      queueMicrotask(() => {
+        child.stdout.emit('data', Buffer.from([
+          JSON.stringify({ type: 'runStarted', data: { sessionId, engine: 'v3' } }),
+          JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call', toolCallId: 'tc-1', title: 'Read File', kind: 'read', rawInput: { path: 'a.ts' } } } }),
+          JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call_update', toolCallId: 'tc-1', status: 'completed', rawOutput: { message: 'file body' } } } }),
+        ].join('\n'), 'utf-8'));
+        controller.abort();
+        child.emit('close', null, 'SIGTERM');
+      });
+      return child;
+    });
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'read a.ts', {
+      cwd: '/repo',
+      onStream,
+      abortSignal: controller.signal,
+    });
+
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('aborted');
+    const emitted = onStream.mock.calls.map(([event]) => event.type);
+    expect(emitted).toEqual(['tool_use', 'tool_result', 'result']);
+    const resultEvent = onStream.mock.calls.at(-1)?.[0] as { data: { success: boolean } };
+    expect(resultEvent.data.success).toBe(false);
+  });
+
+  // stderr が認証エラーを示し stdout が非成功の runFinished を残す非ゼロ終了
+  // では、利用者向けの API キー設定案内を保持しつつ終端診断を添える。
+  it('Given auth stderr and a non-success runFinished on stdout, When the process exits non-zero, Then keeps the auth guidance with the run status detail', async () => {
+    mockSpawnWithScenario({
+      stdout: [
+        JSON.stringify({ type: 'runStarted', data: { sessionId, engine: 'v3' } }),
+        JSON.stringify({ type: 'runFinished', data: { sessionId, status: 'failed', finalText: '' } }),
+        '',
+      ].join('\n'),
+      code: 1,
+      stderr: 'Authentication failed for API key',
+    });
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'say hi', { cwd: '/repo', onStream });
+
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('Kiro authentication failed');
+    expect(result.error).toContain('status "failed"');
+    const resultEvent = onStream.mock.calls.at(-1)?.[0] as { data: { error?: string } };
+    expect(resultEvent.data.error).toContain('Kiro authentication failed');
+    expect(resultEvent.data.error).toContain('status "failed"');
+  });
+
+  // JSONL に解釈できない平文 stdout は API キーを含み得る。失敗経路では
+  // text イベントとして流さず、マスク済みのプロセス診断として届ける。
+  it('Given plaintext stdout embedding the API key on a non-zero exit, When called, Then does not stream raw text and masks the key in the diagnostic', async () => {
+    mockSpawnWithScenario({
+      stdout: 'token kiro-secret-123 was rejected by the server',
+      code: 1,
+    });
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'say hi', { cwd: '/repo', onStream, kiroApiKey: 'kiro-secret-123' });
+
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('code 1');
+    expect(result.error).toContain('[REDACTED]');
+    expect(result.error).not.toContain('kiro-secret-123');
+    const emitted = onStream.mock.calls.map(([event]) => event.type);
+    expect(emitted).toEqual(['result']);
+    const resultEvent = onStream.mock.calls.at(-1)?.[0] as { data: { error?: string } };
+    expect(resultEvent.data.error).not.toContain('kiro-secret-123');
+    expect(resultEvent.data.error).toContain('[REDACTED]');
+  });
+
   // runError の message には CLI 側がエラー文をそのまま乗せることがあり、
   // API キーを含み得る。終了コード 0 / 非ゼロのどちらの経路でも、ストリームの
   // result イベントと返り値の error の両方がマスク済みであることを確認する。

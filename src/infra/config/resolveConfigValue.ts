@@ -1,7 +1,6 @@
 import * as globalConfigModule from './global/globalConfig.js';
 import { loadGlobalConfigTraceState } from './global/globalConfigCore.js';
 import {
-  isDenyWinsGrantOrigin,
   isDenyWinsProviderOptionPath,
   mergeProviderOptions,
   resolveEffectiveProviderOptions,
@@ -664,15 +663,19 @@ export function resolveProviderOptionsWithTrace(
         return globalTrace.getOrigin(tracePath);
       }
       // A `true` grants only from user-managed origins: an env/CLI value in
-      // either trace, or the user's global config file. A project-layer
-      // `true` ('local') must not hide a global grant by being checked first.
+      // either trace, or the user's global config file holding `true` at this
+      // leaf itself — an unrelated `provider_options` ancestor must not lend
+      // its 'global' origin to a project-layer `true`.
       const projectOrigin = projectTrace.getOrigin(tracePath);
       if (projectOrigin === 'env' || projectOrigin === 'cli') {
         return projectOrigin;
       }
       const globalOrigin = globalTrace.getOrigin(tracePath);
-      if (isDenyWinsGrantOrigin(globalOrigin)) {
+      if (globalOrigin === 'env' || globalOrigin === 'cli') {
         return globalOrigin;
+      }
+      if (globalTrace.getFileValue(tracePath) === true) {
+        return 'global';
       }
     }
     if (

@@ -730,6 +730,43 @@ describe('resolveProviderOptionsWithTrace', () => {
     expect(effective?.kiro?.trustWorkspace).toBe(false);
   });
 
+  // global 側に trust_workspace が無く無関係な provider_options だけがある
+  // 場合、祖先の 'global' 帰属が project の true を付与に転用してはいけない。
+  // 付与は「対象キー自体がユーザー管理ソースで true」の場合に限る。
+  it('global が kiro.mode のみで project だけが trust_workspace:true の場合は付与にならない', () => {
+    writeFileSync(
+      globalConfigPath,
+      [
+        'language: en',
+        'provider_options:',
+        '  kiro:',
+        '    mode: spec',
+      ].join('\n'),
+      'utf-8',
+    );
+    invalidateGlobalConfigCache();
+
+    const configDir = getProjectConfigDir(projectDir);
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, 'config.yaml'),
+      ['provider_options:', '  kiro:', '    trust_workspace: true'].join('\n'),
+      'utf-8',
+    );
+
+    const resolved = resolveProviderOptionsWithTrace(projectDir);
+    const effective = resolveEffectiveProviderOptions(
+      resolved.source,
+      resolved.originResolver,
+      resolved.value,
+      undefined,
+    );
+
+    expect(resolved.value?.kiro?.trustWorkspace).toBe(true);
+    expect(resolved.originResolver('kiro.trustWorkspace')).toBe('local');
+    expect(effective?.kiro?.trustWorkspace).toBeUndefined();
+  });
+
   // TAKT_PROVIDER_OPTIONS の root JSON にある trust_workspace:false も拒否。
   // 同じ env 優先度の leaf 変数に true を書くと leaf trace entry が上書きされ、
   // root JSON の拒否が見えなくなる — env 合成の前に祖先 JSON の拒否を拾う。
