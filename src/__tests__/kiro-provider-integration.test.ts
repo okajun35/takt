@@ -123,7 +123,7 @@ describe('KiroProvider integration', () => {
     const result = await agent.call('implement & verify | summarize', {
       cwd: testDir,
       permissionMode: 'edit',
-      sessionId: 'sess-chain',
+      sessionId: 'sess_chain',
     });
 
     expect(result.status).toBe('done');
@@ -141,12 +141,11 @@ describe('KiroProvider integration', () => {
       '--no-interactive',
       '--agent-engine',
       'v3',
-      '--trust-workspace',
       '--output-format',
       'stream-json',
       '--trust-tools=read,grep,write,shell',
       '--resume-id',
-      'sess-chain',
+      'sess_chain',
     ]);
     expect(options.cwd).toBe(testDir);
     expect(options.env?.KIRO_API_KEY).toBe('kiro-chain-key');

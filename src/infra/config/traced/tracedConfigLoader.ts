@@ -11,7 +11,10 @@ import { loadTraceEntriesViaRuntime } from './tracedConfigRuntimeBridge.js';
 import {
   assertNoRemovedProviderOptionConfigurationValues,
   assertNoRemovedProviderOptionEnvironmentVariables,
+  PROVIDER_OPTIONS_DENY_WINS_ENV_PATHS,
 } from '../providerOptionsContract.js';
+
+const DENY_WINS_ENV_PATHS: ReadonlySet<string> = new Set(PROVIDER_OPTIONS_DENY_WINS_ENV_PATHS);
 
 type TraceEntry = {
   traced: TracedValue<unknown>;
@@ -158,6 +161,17 @@ function buildRawConfig(
     }
   }
 
+  for (const path of DENY_WINS_ENV_PATHS) {
+    if (!schemaKeys.includes(path)) {
+      continue;
+    }
+    // A file-side `false` is a refusal: an env/cli `true` must not overwrite it
+    // here, or the deny-wins merge downstream would never see the refusal.
+    if (getNestedConfigValue(parsedConfig, path) === false) {
+      setNestedConfigValue(rawConfig, path, false);
+    }
+  }
+
   return rawConfig;
 }
 
@@ -199,6 +213,12 @@ export function loadConfigTrace(options: LoadConfigTraceOptions): {
       if (
         filePreferredEnvPaths.has(path)
         && getNestedConfigValue(parsedConfig, path) !== undefined
+      ) {
+        return options.fileOrigin;
+      }
+      if (
+        DENY_WINS_ENV_PATHS.has(path)
+        && getNestedConfigValue(parsedConfig, path) === false
       ) {
         return options.fileOrigin;
       }

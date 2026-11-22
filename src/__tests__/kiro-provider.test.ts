@@ -74,7 +74,7 @@ describe('KiroProvider', () => {
     await agent.call('implement', {
       cwd: '/tmp/work',
       model: 'claude-3-opus',
-      sessionId: 'sess-1',
+      sessionId: 'sess_1',
       permissionMode: 'full',
       onActivity,
     });
@@ -85,7 +85,7 @@ describe('KiroProvider', () => {
       expect.objectContaining({
         cwd: '/tmp/work',
         model: 'claude-3-opus',
-        sessionId: 'sess-1',
+        sessionId: 'sess_1',
         permissionMode: 'full',
         onActivity,
         kiroApiKey: 'resolved-key',

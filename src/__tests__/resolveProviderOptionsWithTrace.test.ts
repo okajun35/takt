@@ -615,4 +615,58 @@ describe('resolveProviderOptionsWithTrace', () => {
     expect(resolved.value?.kiro?.trustWorkspace).toBe(false);
     expect(effective?.kiro?.trustWorkspace).toBe(false);
   });
+
+  // ファイル側の trust_workspace:false と env の true が同一設定ファイルの
+  // 境界（traced config の env 取り込み）で競合した場合でも、拒否優先の
+  // ルールにより false が rawConfig に残る。env 取り込みで file の拒否が
+  // 消えると下流の deny-wins merge が拒否を見られない。
+  it('project の kiro.trust_workspace: false は env の true に覆されない', () => {
+    const configDir = getProjectConfigDir(projectDir);
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, 'config.yaml'),
+      ['provider_options:', '  kiro:', '    trust_workspace: false'].join('\n'),
+      'utf-8',
+    );
+    process.env.TAKT_PROVIDER_OPTIONS_KIRO_TRUST_WORKSPACE = 'true';
+
+    const resolved = resolveProviderOptionsWithTrace(projectDir);
+    const effective = resolveEffectiveProviderOptions(
+      resolved.source,
+      resolved.originResolver,
+      resolved.value,
+      { kiro: { trustWorkspace: true } },
+    );
+
+    expect(resolved.value?.kiro?.trustWorkspace).toBe(false);
+    expect(resolved.originResolver('kiro.trustWorkspace')).toBe('local');
+    expect(effective?.kiro?.trustWorkspace).toBe(false);
+  });
+
+  it('global の kiro.trust_workspace: false は env の true に覆されない', () => {
+    writeFileSync(
+      globalConfigPath,
+      [
+        'language: en',
+        'provider_options:',
+        '  kiro:',
+        '    trust_workspace: false',
+      ].join('\n'),
+      'utf-8',
+    );
+    invalidateGlobalConfigCache();
+    process.env.TAKT_PROVIDER_OPTIONS_KIRO_TRUST_WORKSPACE = 'true';
+
+    const resolved = resolveProviderOptionsWithTrace(projectDir);
+    const effective = resolveEffectiveProviderOptions(
+      resolved.source,
+      resolved.originResolver,
+      resolved.value,
+      { kiro: { trustWorkspace: true } },
+    );
+
+    expect(resolved.value?.kiro?.trustWorkspace).toBe(false);
+    expect(resolved.originResolver('kiro.trustWorkspace')).toBe('global');
+    expect(effective?.kiro?.trustWorkspace).toBe(false);
+  });
 });

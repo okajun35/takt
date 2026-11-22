@@ -10,6 +10,7 @@ import { isDelegatedWorkflowStep } from '../step-kind.js';
 import { applyProviderModelOverride, assertTagMatchesAgree, tagRoutingEntryIdentity } from '../provider-resolution.js';
 import { countMatchedLadderStages } from './PromotionEvaluator.js';
 import {
+  isDenyWinsProviderOptionPath,
   isFilePreferredProviderOptionPath,
   mergeProviderOptions,
   PROVIDER_OPTION_PATHS,
@@ -86,6 +87,7 @@ function filterPromotionProviderOptions(
     const baseSource = baseSources?.[path];
     if (
       !isFilePreferredProviderOptionPath(path)
+      && !(isDenyWinsProviderOptionPath(path) && value === false)
       && (baseSource === 'env' || baseSource === 'cli')
     ) {
       continue;
@@ -99,6 +101,7 @@ function filterPromotionProviderOptions(
 }
 
 function resolvePromotionProviderOptionsSources(
+  baseOptions: StepProviderInfo['providerOptions'],
   baseSources: StepProviderInfo['providerOptionsSources'],
   promotionOptions: StepProviderInfo['providerOptions'],
 ): StepProviderInfo['providerOptionsSources'] {
@@ -110,9 +113,19 @@ function resolvePromotionProviderOptionsSources(
     ...baseSources,
   };
   for (const path of PROVIDER_OPTION_PATHS) {
-    if (getProviderOptionValue(promotionOptions, path) !== undefined) {
-      sources[path] = 'promotion';
+    const value = getProviderOptionValue(promotionOptions, path);
+    if (value === undefined) {
+      continue;
     }
+    if (
+      isDenyWinsProviderOptionPath(path)
+      && value !== false
+      && getProviderOptionValue(baseOptions, path) === false
+    ) {
+      // Deny-wins keeps the base refusal; the source stays the layer that refused.
+      continue;
+    }
+    sources[path] = 'promotion';
   }
   return Object.keys(sources).length > 0 ? sources : undefined;
 }
@@ -264,6 +277,7 @@ export function resolvePromotionProviderOptions(
   return {
     providerOptions: mergeProviderOptions(baseProviderInfo.providerOptions, filteredPromotionOptions),
     providerOptionsSources: resolvePromotionProviderOptionsSources(
+      baseProviderInfo.providerOptions,
       baseProviderInfo.providerOptionsSources,
       filteredPromotionOptions,
     ),

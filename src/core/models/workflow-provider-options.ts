@@ -150,12 +150,14 @@ export interface KiroProviderOptions {
   /** kiro-cli `--mode` (V3 agent mode). An `--agent` selection overrides the mode. */
   mode?: KiroMode;
   /**
-   * kiro-cli `--trust-workspace` (V3). Added by default outside readonly
-   * permission mode: workspace `.kiro` agents/hooks/MCP then load without a
-   * trust prompt — workspace-defined hooks and MCP stdio servers execute
-   * without confirmation. Set false to omit the flag for untrusted
-   * repositories; an explicit false in any config layer wins over true
-   * elsewhere, and in readonly mode the flag is never sent.
+   * kiro-cli `--trust-workspace` (V3). Sent only when explicitly `true`
+   * outside readonly mode: workspace `.kiro` agents/hooks/MCP then load
+   * without a trust prompt — workspace-defined hooks and MCP stdio servers
+   * execute without confirmation. Unset or false omits the flag; an explicit
+   * false in any config layer wins over true elsewhere, and in readonly mode
+   * the flag is never sent. Omission controls only the launch flag: a folder
+   * the user already trusted in Kiro CLI keeps its persisted trust (stored
+   * outside the checkout) and may still load `.kiro`.
    */
   trustWorkspace?: boolean;
   guards?: ProviderGuardOptions;

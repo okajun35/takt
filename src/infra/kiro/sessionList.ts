@@ -8,6 +8,13 @@ const log = createLogger('kiro-session-list');
 
 const LIST_SESSIONS_TIMEOUT_MS = 10_000;
 
+/** V3 sessions are reported as `sess_<id>`; bare-UUID IDs belong to the V2 store. */
+export const KIRO_V3_SESSION_ID_PATTERN = /^sess_[A-Za-z0-9._:-]+$/;
+
+export function isKiroV3SessionId(sessionId: string): boolean {
+  return KIRO_V3_SESSION_ID_PATTERN.test(sessionId);
+}
+
 export interface KiroListedSession {
   sessionId: string;
   /** Session store the entry lives in; V3 sessions report `source: "v3"`. */

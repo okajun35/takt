@@ -96,13 +96,30 @@ it('retains and lists sessions whose provider cannot be checked', async () => {
 
 it('retains Kiro records found in the list or present only in an unrecognized diagnostic', async () => {
   const store = recordsStore;
-  const present = '123e4567-e89b-12d3-a456-426614174000';
-  const unknown = '123e4567-e89b-12d3-a456-426614174001';
+  const present = 'sess_123e4567-e89b-12d3-a456-426614174000';
+  const unknown = 'sess_123e4567-e89b-12d3-a456-426614174001';
   await turn(store, 'kiro', present, 'present');
   await turn(store, 'kiro', unknown, 'unknown');
   kiroExec.mockResolvedValue({ stdout: '', stderr: `${present}  updated just now\ndiagnostic ${unknown}` });
   await store.cleanRecords(cwd, (provider, sessionId) => interactiveSessionExists(cwd, provider, sessionId));
   expect((await store.listRecords(cwd, 'kiro')).map((entry) => entry.sessionId)).toEqual([unknown, present]);
+});
+
+it('drops Kiro records whose session ID belongs to the V2 store', async () => {
+  const store = recordsStore;
+  const v2 = '123e4567-e89b-12d3-a456-426614174000';
+  const v3 = 'sess_123e4567-e89b-12d3-a456-426614174001';
+  await turn(store, 'kiro', v2, 'v2 input');
+  await turn(store, 'kiro', v3, 'v3 input');
+  kiroExec.mockResolvedValue({
+    stdout: JSON.stringify([
+      { cwd, sessions: [{ sessionId: v3, source: 'v3' }], complete: true },
+    ]),
+    stderr: '',
+  });
+  await store.cleanRecords(cwd, (provider, sessionId) => interactiveSessionExists(cwd, provider, sessionId));
+  expect((await store.listRecords(cwd, 'kiro')).map((entry) => entry.sessionId)).toEqual([v3]);
+  expect(kiroExec).toHaveBeenCalledTimes(1);
 });
 
 it('keeps the newest ten independently for each provider', async () => {

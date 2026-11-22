@@ -21,6 +21,7 @@ import {
   getPresentProviderOptionPaths,
   toProviderOptionsTracePath,
 } from '../infra/config/providerOptionsContract.js';
+import { resolvePromotionProviderOptions } from '../core/workflow/promotion/promotion-runtime.js';
 import type { StepProviderOptions } from '../core/models/workflow-provider-options.js';
 
 function asProviderOptions(value: unknown): StepProviderOptions {
@@ -795,6 +796,74 @@ describe('resolveEffectiveProviderOptions', () => {
       (path: string) => (path === 'kiro.trustWorkspace' ? 'env' : 'local'),
       'project',
     )).toBe('env');
+  });
+
+  // deny-wins で実効値が false になるとき、source は true を設定した
+  // レイヤーではなく拒否したレイヤーを指す。config/step/persona のどの
+  // レイヤーが拒否しても、そのレイヤーが source として報告される。
+  it('kiro.trustWorkspace の source は deny-wins で拒否したレイヤーを示す', () => {
+    expect(resolveProviderOptionSource(
+      'kiro.trustWorkspace',
+      { kiro: { trustWorkspace: true } },
+      [],
+      { kiro: { trustWorkspace: false } },
+      (path: string) => (path === 'kiro.trustWorkspace' ? 'local' : 'default'),
+      'project',
+    )).toBe('project');
+
+    expect(resolveProviderOptionSource(
+      'kiro.trustWorkspace',
+      { kiro: { trustWorkspace: false } },
+      [],
+      { kiro: { trustWorkspace: true } },
+      (path: string) => (path === 'kiro.trustWorkspace' ? 'local' : 'default'),
+      'project',
+    )).toBe('step');
+
+    expect(resolveProviderOptionSource(
+      'kiro.trustWorkspace',
+      { kiro: { trustWorkspace: true } },
+      [{ source: 'persona_providers', options: { kiro: { trustWorkspace: false } } }],
+      { kiro: { trustWorkspace: true } },
+      (path: string) => (path === 'kiro.trustWorkspace' ? 'local' : 'default'),
+      'project',
+    )).toBe('persona_providers');
+  });
+
+  // promotion でも deny-wins は成立する。env/cli 由来の基準値保護フィルタが
+  // ラダー側の false を捨てると拒否が実行用オプションへ届かないため、
+  // 拒否値はフィルタを通過させる。基準側の false は source も保持する。
+  it('promotion の kiro.trustWorkspace でも拒否値はフィルタを通過し source は拒否側を指す', () => {
+    const promotedRefusal = resolvePromotionProviderOptions(
+      {
+        providerOptions: { kiro: { trustWorkspace: true } },
+        providerOptionsSources: { 'kiro.trustWorkspace': 'env' },
+      },
+      { kiro: { trustWorkspace: false } },
+    );
+    expect(promotedRefusal.providerOptions?.kiro?.trustWorkspace).toBe(false);
+    expect(promotedRefusal.providerOptionsSources?.['kiro.trustWorkspace']).toBe('promotion');
+
+    const retainedRefusal = resolvePromotionProviderOptions(
+      {
+        providerOptions: { kiro: { trustWorkspace: false } },
+        providerOptionsSources: { 'kiro.trustWorkspace': 'global' },
+      },
+      { kiro: { trustWorkspace: true } },
+    );
+    expect(retainedRefusal.providerOptions?.kiro?.trustWorkspace).toBe(false);
+    expect(retainedRefusal.providerOptionsSources?.['kiro.trustWorkspace']).toBe('global');
+
+    // 拒否値以外は従来どおり env/cli 由来の基準値を promotion が上書きしない。
+    const filteredGrant = resolvePromotionProviderOptions(
+      {
+        providerOptions: { kiro: { effort: 'low' } },
+        providerOptionsSources: { 'kiro.effort': 'env' },
+      },
+      { kiro: { effort: 'high' } },
+    );
+    expect(filteredGrant.providerOptions?.kiro?.effort).toBe('low');
+    expect(filteredGrant.providerOptionsSources?.['kiro.effort']).toBe('env');
   });
 
   it('kiro.effort のみ指定でも結果は undefined にならない', () => {

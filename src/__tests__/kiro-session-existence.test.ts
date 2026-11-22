@@ -44,6 +44,29 @@ it('does not match sessions listed under another workspace cwd', async () => {
   expect(await kiroSessionExists('/project', second)).toBe(true);
 });
 
+it('rejects a V2-store (non-sess_) session ID without listing sessions', async () => {
+  expect(await kiroSessionExists('/project', '123e4567-e89b-12d3-a456-426614174000')).toBe(false);
+  expect(mocks.exec).not.toHaveBeenCalled();
+});
+
+it('rejects a sess_ ID that is listed only under a non-v3 source', async () => {
+  mocks.exec.mockResolvedValue({
+    stdout: sessionListJson([first]).replace('"v3"', '"v2"'),
+    stderr: '',
+  });
+  expect(await kiroSessionExists('/project', first)).toBe(false);
+});
+
+it('treats a listed sess_ ID without a source marker as unknown', async () => {
+  mocks.exec.mockResolvedValue({
+    stdout: JSON.stringify([
+      { cwd: '/project', sessions: [{ sessionId: first }], complete: true },
+    ]),
+    stderr: '',
+  });
+  expect(await kiroSessionExists('/project', first)).toBeUndefined();
+});
+
 it('does not treat stderr text or a failed command as a session', async () => {
   mocks.exec.mockResolvedValueOnce({ stdout: '', stderr: `diagnostic ${first}` }).mockRejectedValueOnce(new Error('failed'));
   expect(await kiroSessionExists('/project', first)).toBeUndefined();

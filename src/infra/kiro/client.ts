@@ -2,7 +2,7 @@ import type { AgentResponse } from '../../core/models/index.js';
 import type { StreamEvent } from '../../shared/types/provider.js';
 import { createLogger, getErrorMessage, stripAnsi } from '../../shared/utils/index.js';
 import { execKiro, type KiroExecError } from './process.js';
-import { listKiroSessions } from './sessionList.js';
+import { isKiroV3SessionId, listKiroSessions } from './sessionList.js';
 import type { KiroCallOptions } from './types.js';
 import {
   emitStructuredEvents,
@@ -18,7 +18,6 @@ const log = createLogger('kiro-client');
 
 const KIRO_ABORTED_MESSAGE = 'Kiro execution aborted';
 const KIRO_ERROR_DETAIL_MAX_LENGTH = 400;
-const KIRO_SESSION_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const KIRO_AGENT_NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
 // Matches only a leading prompt-echo marker (absolute start of the cleaned
 // output), so a Markdown blockquote ("> ") later in the body is left intact.
@@ -49,8 +48,10 @@ function buildTrustArgs(options: KiroCallOptions): string[] {
 }
 
 function validateSessionId(sessionId: string): void {
-  if (!KIRO_SESSION_ID_PATTERN.test(sessionId)) {
-    throw new Error('Invalid Kiro session ID. Only letters, numbers, dot, underscore, colon, and hyphen are allowed.');
+  if (!isKiroV3SessionId(sessionId)) {
+    // V3 --resume-id accepts only `sess_` IDs; a bare UUID belongs to the V2
+    // session store and would resume a different conversation.
+    throw new Error('Invalid Kiro session ID. Expected a V3 session ID starting with "sess_".');
   }
 }
 
@@ -66,13 +67,15 @@ function buildArgs(options: KiroCallOptions): string[] {
     '--no-interactive',
     '--agent-engine',
     'v3',
-    // V3 only, per-launch and not persisted. Never sent under readonly: the
-    // flag trusts workspace-defined hooks/MCP servers, which start external
-    // processes outside the read-only tool sandbox. Other modes add it by
-    // default — without it the run still proceeds but hooks/agents/MCP from
-    // cwd's .kiro silently do not load — and trust_workspace: false opts out
-    // for untrusted repositories (see provider_options.kiro).
-    ...(options.permissionMode !== 'readonly' && options.trustWorkspace !== false
+    // V3 only, per-launch and not persisted. Sent only when
+    // provider_options.kiro.trust_workspace is explicitly true: the flag
+    // trusts workspace-defined hooks/MCP servers, which start external
+    // processes outside the tool sandbox, so granting it requires an explicit
+    // opt-in — never a default. Without the flag, Kiro's own persisted
+    // workspace trust (approved interactively, stored outside the checkout)
+    // still governs whether .kiro hooks/agents/MCP load. Never sent under
+    // readonly either way.
+    ...(options.permissionMode !== 'readonly' && options.trustWorkspace === true
       ? ['--trust-workspace']
       : []),
     '--output-format',
@@ -262,16 +265,6 @@ function normalizedEventKind(value: unknown): string | undefined {
     : undefined;
 }
 
-function isKiroToolUse(record: Record<string, unknown>): boolean {
-  const kind = normalizedEventKind(record.kind ?? record.type ?? record.blockType);
-  return kind === 'tooluse' || kind === 'toolcall' || kind === 'toolrequest';
-}
-
-function isKiroToolResult(record: Record<string, unknown>): boolean {
-  const kind = normalizedEventKind(record.kind ?? record.type ?? record.blockType);
-  return kind === 'toolresult' || kind === 'tooloutput';
-}
-
 function extractKiroSessionId(value: unknown): string | undefined {
   const root = toRecord(value);
   if (root === undefined) {
@@ -279,7 +272,7 @@ function extractKiroSessionId(value: unknown): string | undefined {
   }
   const nestedData = toRecord(root.data);
   const nestedMetadata = toRecord(root.metadata);
-  return firstNonEmptyString([
+  const candidate = firstNonEmptyString([
     root.sessionId,
     root.session_id,
     root.sessionID,
@@ -289,49 +282,9 @@ function extractKiroSessionId(value: unknown): string | undefined {
     nestedMetadata?.sessionId,
     nestedMetadata?.session_id,
   ]);
-}
-
-function parseKiroToolUse(record: Record<string, unknown>): StreamEvent | undefined {
-  const id = firstNonEmptyString([record.toolUseId, record.toolCallId, record.tool_call_id, record.id]);
-  const tool = firstNonEmptyString([record.toolName, record.tool_name, record.name]);
-  if (id === undefined || tool === undefined) {
-    return undefined;
-  }
-  return {
-    type: 'tool_use',
-    data: {
-      id,
-      tool,
-      input: toRecord(record.input ?? record.arguments ?? record.args) ?? {},
-    },
-  };
-}
-
-function parseKiroToolResult(record: Record<string, unknown>): StreamEvent | undefined {
-  const id = firstNonEmptyString([record.toolUseId, record.toolCallId, record.tool_call_id, record.id]);
-  if (id === undefined) {
-    return undefined;
-  }
-  const content = extractStructuredText(
-    record.content
-      ?? record.output
-      ?? record.result
-      ?? record.data
-      ?? record.text,
-  ) ?? '';
-  const status = normalizedEventKind(record.status);
-  return {
-    type: 'tool_result',
-    data: {
-      id,
-      content,
-      isError: record.isError === true
-        || record.is_error === true
-        || record.success === false
-        || status === 'error'
-        || status === 'failed',
-    },
-  };
+  // A resolved ID is later passed back through --resume-id, so keep only the
+  // V3 `sess_` shape here as well; anything else falls back to --list-sessions.
+  return candidate !== undefined && isKiroV3SessionId(candidate) ? candidate : undefined;
 }
 
 /**
@@ -387,44 +340,6 @@ function collectKiroStructuredEvents(
     return;
   }
 
-  if (isKiroToolUse(record)) {
-    startNewAnswerSegment(assistantText);
-    const event = parseKiroToolUse(record);
-    if (event !== undefined) {
-      events.push(event);
-    }
-    return;
-  }
-  if (isKiroToolResult(record)) {
-    const event = parseKiroToolResult(record);
-    if (event !== undefined) {
-      events.push(event);
-    }
-    return;
-  }
-
-  if (kind === 'assistantmessage' || kind === 'assistant') {
-    const content = record.content ?? record.message ?? data?.content ?? data?.message;
-    collectKiroStructuredEvents(
-      content,
-      events,
-      assistantText,
-      terminalContent,
-    );
-    if (typeof content === 'string') {
-      recordAssistantText(content, events, assistantText);
-    }
-    return;
-  }
-  if (kind === 'toolresults' || kind === 'toolresultmessage') {
-    collectKiroStructuredEvents(
-      record.content ?? record.results ?? record.toolResults ?? data?.content ?? data?.results,
-      events,
-      assistantText,
-      terminalContent,
-    );
-    return;
-  }
   if (kind === 'result' || kind === 'final' || kind === 'assistantmessagecomplete') {
     const content = extractStructuredText(
       record.result ?? record.content ?? data?.result ?? data?.content,

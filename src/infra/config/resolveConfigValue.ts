@@ -1,6 +1,7 @@
 import * as globalConfigModule from './global/globalConfig.js';
 import { loadGlobalConfigTraceState } from './global/globalConfigCore.js';
 import {
+  isDenyWinsProviderOptionPath,
   mergeProviderOptions,
   resolveEffectiveProviderOptions,
 } from './providerOptions.js';
@@ -643,7 +644,24 @@ export function resolveProviderOptionsWithTrace(
     projectTrace,
   );
 
+  const providerOptionValue = (options: StepProviderOptions | undefined, path: string): unknown =>
+    path.split('.').reduce<unknown>((current, segment) => (
+      current !== null && typeof current === 'object'
+        ? (current as Record<string, unknown>)[segment]
+        : undefined
+    ), options);
+
   const originResolver: ProviderOptionsOriginResolver = (path: string) => {
+    if (isDenyWinsProviderOptionPath(path)) {
+      // A `false` refusal decides the effective value — attribute the layer
+      // that refused, not a layer that merely granted `true`.
+      if (providerOptionValue(project.providerOptions, path) === false) {
+        return projectTrace.getOrigin(toProviderOptionsTracePath(path));
+      }
+      if (providerOptionValue(global.providerOptions, path) === false) {
+        return globalTrace.getOrigin(toProviderOptionsTracePath(path));
+      }
+    }
     if (
       path === 'codex.baseUrl'
       || path === 'claude.baseUrl'

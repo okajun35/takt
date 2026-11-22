@@ -219,7 +219,7 @@ describe('callKiro', () => {
 
     const result = await callKiro('coder', 'implement feature', {
       cwd: '/repo',
-      sessionId: 'sess-prev',
+      sessionId: 'sess_prev',
       permissionMode: 'full',
       kiroApiKey: 'kiro-secret',
       onActivity,
@@ -227,7 +227,7 @@ describe('callKiro', () => {
 
     expect(result.status).toBe('done');
     expect(result.content).toBe('Implementation complete.');
-    expect(result.sessionId).toBe('sess-prev');
+    expect(result.sessionId).toBe('sess_prev');
     expect(onActivity).toHaveBeenCalledOnce();
 
     expect(mockSpawn).toHaveBeenCalledTimes(1);
@@ -244,12 +244,11 @@ describe('callKiro', () => {
       '--no-interactive',
       '--agent-engine',
       'v3',
-      '--trust-workspace',
       '--output-format',
       'stream-json',
       '--trust-all-tools',
       '--resume-id',
-      'sess-prev',
+      'sess_prev',
     ]);
     expect(child.stdin.write).toHaveBeenCalledWith('implement feature');
     expect(child.stdin.end).toHaveBeenCalledWith();
@@ -576,7 +575,6 @@ describe('callKiro', () => {
       '--no-interactive',
       '--agent-engine',
       'v3',
-      '--trust-workspace',
       '--output-format',
       'stream-json',
     ]);
@@ -601,7 +599,6 @@ describe('callKiro', () => {
       '--no-interactive',
       '--agent-engine',
       'v3',
-      '--trust-workspace',
       '--output-format',
       'stream-json',
     ]);
@@ -668,6 +665,17 @@ describe('callKiro', () => {
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
+  it('Given a V2-store (non-sess_) session ID, When called, Then rejects it before spawn', async () => {
+    const result = await callKiro('coder', 'inspect', {
+      cwd: '/repo',
+      sessionId: '123e4567-e89b-12d3-a456-426614174000',
+    });
+
+    expect(result.status).toBe('error');
+    expect(result.content).toContain('Invalid Kiro session ID');
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
   it('Given agent option, When called, Then passes --agent with the agent name before the positional input', async () => {
     mockSpawnWithScenario({
       stdout: 'planned',
@@ -697,7 +705,7 @@ describe('callKiro', () => {
 
     await callKiro('coder', 'implement feature', {
       cwd: '/repo',
-      sessionId: 'sess-prev',
+      sessionId: 'sess_prev',
       permissionMode: 'full',
       agent: 'coder-agent',
     });
@@ -705,7 +713,7 @@ describe('callKiro', () => {
     const [, args] = mockSpawn.mock.calls[0] as [string, string[]];
     expect(args).toContain('--trust-all-tools');
     expect(args).toContain('--resume-id');
-    expect(args).toContain('sess-prev');
+    expect(args).toContain('sess_prev');
     const agentFlagIndex = args.indexOf('--agent');
     expect(agentFlagIndex).toBeGreaterThanOrEqual(0);
     expect(args[agentFlagIndex + 1]).toBe('coder-agent');
@@ -754,13 +762,27 @@ describe('callKiro', () => {
     expect(args).toContain('--agent-engine');
   });
 
-  it('Given no trustWorkspace option, When called, Then adds --trust-workspace', async () => {
+  // --trust-workspace は workspace 定義の hooks/MCP という外部プロセス実行を
+  // 許可するフラグなので、未設定では付与しない（Kiro CLI の永続信頼が実効）。
+  it('Given no trustWorkspace option, When called, Then omits --trust-workspace', async () => {
     mockSpawnWithScenario({
       stdout: 'done',
       code: 0,
     });
 
     await callKiro('coder', 'implement', { cwd: '/repo' });
+
+    const [, args] = mockSpawn.mock.calls[0] as [string, string[]];
+    expect(args).not.toContain('--trust-workspace');
+  });
+
+  it('Given trustWorkspace true, When called, Then adds --trust-workspace', async () => {
+    mockSpawnWithScenario({
+      stdout: 'done',
+      code: 0,
+    });
+
+    await callKiro('coder', 'implement', { cwd: '/repo', trustWorkspace: true });
 
     const [, args] = mockSpawn.mock.calls[0] as [string, string[]];
     expect(args).toContain('--trust-workspace');
@@ -866,7 +888,7 @@ describe('callKiro', () => {
     const result = await callKiro('planner', 'write the report', {
       cwd: '/repo',
       onStream,
-      sessionId: '123e4567-e89b-12d3-a456-426614174000',
+      sessionId: 'sess_123e4567-e89b-12d3-a456-426614174000',
     });
 
     expect(result.status).toBe('error');
@@ -1219,7 +1241,6 @@ describe('callKiro session ID resolution (issue #781)', () => {
       '--no-interactive',
       '--agent-engine',
       'v3',
-      '--trust-workspace',
       '--output-format',
       'stream-json',
     ]);
@@ -1238,11 +1259,11 @@ describe('callKiro session ID resolution (issue #781)', () => {
 
     const result = await callKiro('coder', 'continue', {
       cwd: '/repo',
-      sessionId: 'sess-prev',
+      sessionId: 'sess_prev',
     });
 
     expect(result.status).toBe('done');
-    expect(result.sessionId).toBe('sess-prev');
+    expect(result.sessionId).toBe('sess_prev');
     expect(mockSpawn).toHaveBeenCalledTimes(1);
   });
 
@@ -1479,7 +1500,7 @@ describe('callKiro output cleanup (issue #781)', () => {
 
     const result = await callKiro('coder', 'continue', {
       cwd: '/repo',
-      sessionId: 'sess-prev',
+      sessionId: 'sess_prev',
     });
 
     expect(result.status).toBe('done');
@@ -1495,7 +1516,7 @@ describe('callKiro output cleanup (issue #781)', () => {
 
     const result = await callKiro('coder', 'continue', {
       cwd: '/repo',
-      sessionId: 'sess-prev',
+      sessionId: 'sess_prev',
     });
 
     expect(result.status).toBe('done');
@@ -1510,7 +1531,7 @@ describe('callKiro output cleanup (issue #781)', () => {
 
     const result = await callKiro('coder', 'continue', {
       cwd: '/repo',
-      sessionId: 'sess-prev',
+      sessionId: 'sess_prev',
     });
 
     expect(result.status).toBe('done');
@@ -1519,7 +1540,15 @@ describe('callKiro output cleanup (issue #781)', () => {
 
   it('uses a single assistant content source when an envelope repeats content', async () => {
     mockSpawnWithScenario({ stdout: JSON.stringify({
-      kind: 'AssistantMessage', content: 'answer', data: { content: 'answer' },
+      type: 'sessionUpdate',
+      data: {
+        sessionId: 'sess_1',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'answer' },
+          data: { content: 'answer' },
+        },
+      },
     }) });
 
     const result = await callKiro('coder', 'inspect task', { cwd: '/repo' });
@@ -1530,10 +1559,10 @@ describe('callKiro output cleanup (issue #781)', () => {
   it('returns only the text after the last tool use as content when Kiro JSONL has no terminal result', async () => {
     mockSpawnWithScenario({
       stdout: [
-        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'sess-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Progress note: checked input.ts. ' } } } }),
-        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'kiro-tool-1', title: 'read', kind: 'read', rawInput: { path: 'retry.ts' } } } }),
-        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'kiro-tool-1', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'retry source' } }] } } }),
-        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'sess-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Final answer' } } } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'sess_1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Progress note: checked input.ts. ' } } } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'sess_1', update: { sessionUpdate: 'tool_call', toolCallId: 'kiro-tool-1', title: 'read', kind: 'read', rawInput: { path: 'retry.ts' } } } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'sess_1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'kiro-tool-1', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'retry source' } }] } } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'sess_1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Final answer' } } } }),
       ].join('\n'),
       code: 0,
     });
@@ -1551,23 +1580,23 @@ describe('callKiro output cleanup (issue #781)', () => {
   it('returns an empty successful answer with the session ID when the turn ends with a tool call', async () => {
     mockSpawnWithScenario({
       stdout: [
-        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'kiro-session', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Progress note: editing retry.ts. ' } } } }),
-        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'kiro-session', update: { sessionUpdate: 'tool_call', toolCallId: 'kiro-tool-1', title: 'write', kind: 'edit', rawInput: { path: 'retry.ts' } } } }),
-        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'kiro-session', update: { sessionUpdate: 'tool_call_update', toolCallId: 'kiro-tool-1', status: 'completed', rawOutput: { message: 'written' } } } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'sess_kiro-session', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Progress note: editing retry.ts. ' } } } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'sess_kiro-session', update: { sessionUpdate: 'tool_call', toolCallId: 'kiro-tool-1', title: 'write', kind: 'edit', rawInput: { path: 'retry.ts' } } } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId: 'sess_kiro-session', update: { sessionUpdate: 'tool_call_update', toolCallId: 'kiro-tool-1', status: 'completed', rawOutput: { message: 'written' } } } }),
       ].join('\n'),
       code: 0,
     });
 
     const onStream = vi.fn();
-    const result = await callKiro('coder', 'edit retry.ts', { cwd: '/repo', sessionId: 'kiro-session', onStream });
+    const result = await callKiro('coder', 'edit retry.ts', { cwd: '/repo', sessionId: 'sess_kiro-session', onStream });
 
     // An empty answer continues the same session; a provider error would repeat the edit in a fresh session.
-    expect(result).toMatchObject({ status: 'done', content: '', sessionId: 'kiro-session' });
+    expect(result).toMatchObject({ status: 'done', content: '', sessionId: 'sess_kiro-session' });
     expect(result.error).toBeUndefined();
     expect(onStream).toHaveBeenCalledWith({ type: 'text', data: { text: 'Progress note: editing retry.ts. ' } });
     expect(onStream).toHaveBeenCalledWith({
       type: 'result',
-      data: expect.objectContaining({ result: '', success: true, sessionId: 'kiro-session' }),
+      data: expect.objectContaining({ result: '', success: true, sessionId: 'sess_kiro-session' }),
     });
   });
 
@@ -1594,21 +1623,21 @@ describe('callKiro output cleanup (issue #781)', () => {
         JSON.stringify({
           type: 'sessionUpdate',
           data: {
-            sessionId: 'kiro-session',
+            sessionId: 'sess_kiro-session',
             update: { sessionUpdate: 'tool_call', toolCallId: 'kiro-tool-1', title: 'takt_get_run', kind: 'execute', rawInput: { runSlug: 'run-from-kiro' } },
           },
         }),
         JSON.stringify({
           type: 'sessionUpdate',
           data: {
-            sessionId: 'kiro-session',
+            sessionId: 'sess_kiro-session',
             update: { sessionUpdate: 'tool_call_update', toolCallId: 'kiro-tool-1', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: `run details\n${marker}` } }] },
           },
         }),
         JSON.stringify({
           type: 'sessionUpdate',
           data: {
-            sessionId: 'kiro-session',
+            sessionId: 'sess_kiro-session',
             update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'answer' } },
           },
         }),
@@ -1625,7 +1654,6 @@ describe('callKiro output cleanup (issue #781)', () => {
       '--no-interactive',
       '--agent-engine',
       'v3',
-      '--trust-workspace',
       '--output-format',
       'stream-json',
     ]);
@@ -1634,7 +1662,7 @@ describe('callKiro output cleanup (issue #781)', () => {
     expect(result).toMatchObject({
       status: 'done',
       content: 'answer',
-      sessionId: 'kiro-session',
+      sessionId: 'sess_kiro-session',
     });
     expect(onStream).toHaveBeenCalledWith({
       type: 'tool_use',

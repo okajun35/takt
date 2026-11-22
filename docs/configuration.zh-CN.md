@@ -324,7 +324,7 @@ ignore_exceed: false          # 对 takt run 和 takt watch 应用 --ignore-exce
 #     agent: my-default-agent
 #     effort: medium
 #     mode: spec          # Kiro CLI V3 代理模式：default 或 spec（agent 优先于 mode）
-#     trust_workspace: false  # V3：省略 --trust-workspace（readonly 模式下始终省略）；任意配置层的 false 优先（默认：true）
+#     trust_workspace: true  # V3：传递 --trust-workspace（readonly 模式下始终省略；默认：未设置 = 不传该标志）
 #   pi:
 #     extensions: [npm:pi-fff]
 #     no_skills: true
@@ -855,7 +855,7 @@ devin_cli_path: /usr/local/bin/devin
 - **Pi** 接受 `provider/model` 引用或能唯一匹配 Pi model 的裸 ID。reference 只按 `/` 分割，因此 `provider/model:high` 中的 `model:high` 是字面 model ID。thinking level 通过 `provider_options.pi.thinking_level` 或 `TAKT_PROVIDER_OPTIONS_PI_THINKING_LEVEL` 设置；省略时使用 Pi SDK 默认值 `medium`。显式设置的 level 会应用于每个 Pi turn。省略 model 时，TAKT 保留 Pi session 当前的 model。
 - **Cursor Agent** 将 model 原样传给 `cursor-agent --model <model>`。
 - **GitHub Copilot CLI** 将 model 原样传给 `copilot --model <model>`。
-- **Kiro CLI** 将 model 原样传给 `kiro-cli chat --model <model>`。TAKT 始终使用 V3 引擎运行（`kiro-cli chat --no-interactive --agent-engine v3`），会话 ID 使用 `sess_<uuid>` 格式。`provider_options.kiro.mode` 用于选择 V3 模式（`default` 或 `spec`）——非交互模式选择需要 Kiro CLI 3.5.0 或更高版本；显式指定 `provider_options.kiro.agent` 时优先于 mode，新会话中 Kiro 的 `chat.defaultAgent` 配置也优先于 `--mode`。默认会附加 `--trust-workspace`：工作区 `.kiro` 下的 agent、hook 和 MCP 配置会在无交互信任提示的情况下加载，但这会在未经确认的情况下运行工作区定义的 hooks 和 MCP stdio 服务器。`provider_options.kiro.trust_workspace: false` 可省略该标志（任意配置层的 `false` 优先；`readonly` 权限模式下无论设置如何都不会附加）。该选项仅控制 TAKT 传递的标志：在 Kiro CLI 中已被信任过的文件夹会保留持久化的信任，工作区配置仍可能被加载，因此 `false` 不能保证 `.kiro` 内容不被加载。
+- **Kiro CLI** 将 model 原样传给 `kiro-cli chat --model <model>`。TAKT 始终使用 V3 引擎运行（`kiro-cli chat --no-interactive --agent-engine v3`），会话 ID 使用 `sess_<uuid>` 格式。`provider_options.kiro.mode` 用于选择 V3 模式（`default` 或 `spec`）——非交互模式选择需要 Kiro CLI 3.5.0 或更高版本；显式指定 `provider_options.kiro.agent` 时优先于 mode，新会话中 Kiro 的 `chat.defaultAgent` 配置也优先于 `--mode`。仅当 `provider_options.kiro.trust_workspace` 显式为 `true` 时才附加 `--trust-workspace`：工作区 `.kiro` 下的 agent、hook 和 MCP 配置会在无交互信任提示的情况下加载，但这会在未经确认的情况下运行工作区定义的 hooks 和 MCP stdio 服务器。未设置或为 `false` 时不传该标志（任意配置层的 `false` 优先于 `true`；`readonly` 权限模式下无论设置如何都不会附加）。该选项仅控制 TAKT 传递的标志：在 Kiro CLI 中已被信任过的文件夹会保留持久化的信任（存储在检出目录之外），仍会加载工作区配置，因此不传标志并不能保证 `.kiro` 内容不被加载。
 - **Devin CLI** 将 model 传给 `devin acp --model <model>`（例如 `swe-2-max`、`swe-2-high`、`swe-2-medium`）；ACP session 会把该名称解析为 `model` 与 `thought_level` 配置项，无法解析或应用的名称会立即报错，而不是静默回退到默认值。该校验仅适用于新建 session；恢复的 session 保留创建时使用的 model，不会重新解析所指定的名称。省略时使用用户 Devin config 中配置的默认 model。
 
 ### 示例

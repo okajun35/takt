@@ -238,6 +238,13 @@ const PROVIDER_OPTIONS_FILE_PREFERRED_ENV_PATH_ENTRIES = [
   'provider_options.deepseek_harness.plugins',
 ] as const;
 
+// Boolean options where `false` is a refusal, not a preference: when the file
+// and the dedicated env variable disagree, `false` must survive into rawConfig
+// so the cross-layer deny-wins merge can see it.
+const PROVIDER_OPTIONS_DENY_WINS_ENV_PATH_ENTRIES = [
+  'provider_options.kiro.trust_workspace',
+] as const;
+
 const PROVIDER_OPTIONS_INTERNAL_PATH_ENTRIES = [
   'codex.baseUrl',
   'codex.fastMode',
@@ -305,6 +312,8 @@ export const PROVIDER_OPTIONS_ENV_SPECS: readonly EnvSpec[] = PROVIDER_OPTIONS_E
 export const PROVIDER_OPTIONS_TRACE_PATHS: readonly ProviderOptionsTracePath[] = PROVIDER_OPTIONS_TRACE_PATH_ENTRIES;
 export const PROVIDER_OPTIONS_FILE_PREFERRED_ENV_PATHS: readonly ProviderOptionsTracePath[] =
   PROVIDER_OPTIONS_FILE_PREFERRED_ENV_PATH_ENTRIES;
+export const PROVIDER_OPTIONS_DENY_WINS_ENV_PATHS: readonly ProviderOptionsTracePath[] =
+  PROVIDER_OPTIONS_DENY_WINS_ENV_PATH_ENTRIES;
 export const PROVIDER_OPTIONS_TRACKED_KEYS = [
   'provider_options',
   'provider_options.codex',

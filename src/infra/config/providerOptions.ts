@@ -1785,8 +1785,17 @@ const FILE_PREFERRED_PROVIDER_OPTION_PATHS: ReadonlySet<string> = new Set([
   'deepseekHarness.baseUrl',
 ]);
 
+const DENY_WINS_PROVIDER_OPTION_PATHS: ReadonlySet<string> = new Set([
+  'kiro.trustWorkspace',
+]);
+
 export function isFilePreferredProviderOptionPath(path: string): boolean {
   return FILE_PREFERRED_PROVIDER_OPTION_PATHS.has(path);
+}
+
+/** Options where `false` in any layer vetoes `true` — a refusal must never be dropped. */
+export function isDenyWinsProviderOptionPath(path: string): boolean {
+  return DENY_WINS_PROVIDER_OPTION_PATHS.has(path);
 }
 
 function getValueAtPath(
@@ -1826,6 +1835,18 @@ export function resolveProviderOptionSource(
   const configValue = getValueAtPath(configOptions, path);
   const stepValue = getValueAtPath(stepOptions, path);
   const origin = resolveProviderOptionOrigin(originResolver, path, configSource);
+
+  if (path === 'kiro.trustWorkspace') {
+    // trustWorkspace resolves deny-wins: when `false` is the effective value,
+    // attribute the layer that refused rather than a layer that granted `true`.
+    if (stepValue === false) return 'step';
+    for (const layer of [...layers].reverse()) {
+      if (getValueAtPath(layer.options, path) === false) {
+        return layer.source;
+      }
+    }
+    if (configValue === false) return originToResolutionSource(origin);
+  }
 
   if (
     path !== 'claude.baseUrl'
