@@ -5,7 +5,6 @@ import { execKiro, type KiroExecError } from './process.js';
 import { isKiroV3SessionId, listKiroSessions } from './sessionList.js';
 import type { KiroCallOptions } from './types.js';
 import {
-  emitStructuredEvents,
   extractStructuredText,
   firstNonEmptyString,
   parseValidJsonLines,
@@ -165,7 +164,10 @@ function redactStreamEvent(event: StreamEvent, kiroApiKey: string | undefined): 
 // the API key — per-event whole-match redaction would then print the joined
 // secret to the stream. Hold back `key.length - 1` trailing characters (after
 // in-buffer replacement) so a split key is still masked; flush() returns the
-// held tail, which callers emit as a final text event before the result.
+// held tail. A non-text event flushes the buffer first — held-back text must
+// not overtake a following tool event, or progress notes would land in the
+// post-tool answer. A key split across a tool boundary stays unmasked, but its
+// fragments are never contiguous in the stream, so nothing reconstructs it.
 function createTextRedactor(kiroApiKey: string | undefined): {
   push(text: string): string;
   flush(): string;
@@ -196,23 +198,25 @@ function emitRedactedEvents(
   kiroApiKey: string | undefined,
 ): void {
   const textRedactor = createTextRedactor(kiroApiKey);
-  emitStructuredEvents(
-    options.onStream,
-    events.map((event) => {
-      if (event.type !== 'text') {
-        return redactStreamEvent(event, kiroApiKey);
-      }
-      const text = (event.data as { text?: unknown } | undefined)?.text;
-      return {
-        ...event,
-        data: { ...event.data, text: textRedactor.push(typeof text === 'string' ? text : '') },
-      } as StreamEvent;
-    }),
-  );
-  const tail = textRedactor.flush();
-  if (tail.length > 0) {
-    options.onStream?.({ type: 'text', data: { text: tail } });
+  const flushText = () => {
+    const tail = textRedactor.flush();
+    if (tail.length > 0) {
+      options.onStream?.({ type: 'text', data: { text: tail } });
+    }
+  };
+  for (const event of events) {
+    if (event.type !== 'text') {
+      flushText();
+      options.onStream?.(redactStreamEvent(event, kiroApiKey));
+      continue;
+    }
+    const text = (event.data as { text?: unknown } | undefined)?.text;
+    options.onStream?.({
+      ...event,
+      data: { ...event.data, text: textRedactor.push(typeof text === 'string' ? text : '') },
+    } as StreamEvent);
   }
+  flushText();
 }
 
 function redactedTrimmedDetail(value: string | undefined, kiroApiKey: string | undefined): string {

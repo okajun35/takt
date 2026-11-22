@@ -1711,8 +1711,14 @@ describe('callKiro with real kiro-cli ACP stream-json payload', () => {
     '',
   ].join('\n');
 
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.KIRO_API_KEY;
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
+    restoreEnv();
   });
 
   const chunk = (text: string): string => JSON.stringify({
@@ -2188,6 +2194,37 @@ describe('callKiro with real kiro-cli ACP stream-json payload', () => {
       .map(([event]) => (event.data as { text: string }).text)
       .join('');
     expect(streamedText).toBe('prefix [REDACTED] suffix');
+  });
+
+  // キー設定時でも、ツールイベントの前の進捗本文はツールより先に届く —
+  // チャンク末尾の保留がツールイベントを追い越してはいけない。
+  it('Given an API key and text around a tool call on a successful run, When called, Then progress text reaches the stream before the tool events', async () => {
+    mockSpawnWithScenario({
+      stdout: [
+        chunk('Checking'),
+        toolCallLine,
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call_update', toolCallId: 'tc-1', status: 'completed', rawOutput: { message: 'ok' } } } }),
+        chunk('Done'),
+        JSON.stringify({ type: 'runFinished', data: { sessionId, stopReason: 'end_turn' } }),
+        '',
+      ].join('\n'),
+      code: 0,
+    });
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'say hi', { cwd: '/repo', onStream, kiroApiKey: 'kiro-secret-123', sessionId });
+
+    expect(result.status).toBe('done');
+    const emitted = onStream.mock.calls.map(([event]) =>
+      event.type === 'text' ? (event.data as { text: string }).text : event.type);
+    const toolUseIndex = emitted.indexOf('tool_use');
+    const toolResultIndex = emitted.indexOf('tool_result');
+    const preToolText = emitted.slice(0, toolUseIndex).filter((item) => item !== 'tool_use').join('');
+    const postToolText = emitted.slice(toolResultIndex + 1, -1).join('');
+    expect(toolUseIndex).toBeGreaterThanOrEqual(0);
+    expect(toolResultIndex).toBeGreaterThan(toolUseIndex);
+    expect(preToolText).toBe('Checking');
+    expect(postToolText).toBe('Done');
   });
 
   // JSONL に解釈できない平文 stdout は API キーを含み得る。失敗経路では
