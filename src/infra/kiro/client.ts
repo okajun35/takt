@@ -163,60 +163,82 @@ function redactStreamEvent(event: StreamEvent, kiroApiKey: string | undefined): 
 // Assistant text arrives as consecutive chunks, and a chunk boundary — or a
 // tool event, since consumers concatenate text across tool events — can split
 // the API key. Per-event whole-match redaction would then leak the joined
-// secret. Compute every match over the joined text up front, then emit each
-// chunk's masked share in its original position: the chunk containing a
-// match's start emits `[REDACTED]`, and overlapping characters are dropped
-// from every chunk the match spans. Event order and non-text payloads are
-// preserved.
-function emitRedactedEvents(
-  options: KiroCallOptions,
-  events: readonly StreamEvent[],
-  kiroApiKey: string | undefined,
-): void {
-  const joined = events.map((event) => {
-    const text = (event.data as { text?: unknown } | undefined)?.text;
-    return event.type === 'text' && typeof text === 'string' ? text : '';
-  }).join('');
+// secret. Compute every match over the joined text up front, then mask each
+// span of it in place: the span containing a match's start carries
+// `[REDACTED]`, and overlapping characters are dropped from every span the
+// match covers. Event order and non-text payloads are preserved.
+interface KiroTextRedaction {
+  readonly joined: string;
+  readonly matches: ReadonlyArray<readonly [number, number]>;
+}
+
+function eventText(event: StreamEvent): string {
+  const text = (event.data as { text?: unknown } | undefined)?.text;
+  return event.type === 'text' && typeof text === 'string' ? text : '';
+}
+
+function createTextRedaction(events: readonly StreamEvent[], kiroApiKey: string | undefined): KiroTextRedaction {
+  const joined = events.map(eventText).join('');
   const matches: Array<readonly [number, number]> = [];
   if (kiroApiKey) {
     for (let i = joined.indexOf(kiroApiKey); i >= 0; i = joined.indexOf(kiroApiKey, i + kiroApiKey.length)) {
       matches.push([i, i + kiroApiKey.length]);
     }
   }
+  return { joined, matches };
+}
 
+function maskTextSpan(redaction: KiroTextRedaction, start: number, end: number): string {
+  let out = '';
+  let pos = start;
+  for (const [matchStart, matchEnd] of redaction.matches) {
+    if (matchEnd <= start || matchStart >= end) {
+      continue;
+    }
+    if (matchStart >= start) {
+      out += `${redaction.joined.slice(pos, matchStart)}[REDACTED]`;
+    }
+    pos = Math.min(matchEnd, end);
+  }
+  return out + redaction.joined.slice(pos, end);
+}
+
+function emitRedactedEvents(
+  options: KiroCallOptions,
+  events: readonly StreamEvent[],
+  kiroApiKey: string | undefined,
+  redaction: KiroTextRedaction = createTextRedaction(events, kiroApiKey),
+): void {
   let cursor = 0;
-  let nextMatch = 0;
   for (const event of events) {
     if (event.type !== 'text') {
       options.onStream?.(redactStreamEvent(event, kiroApiKey));
       continue;
     }
     const start = cursor;
-    const raw = (event.data as { text?: unknown } | undefined)?.text;
-    const end = start + (typeof raw === 'string' ? raw.length : 0);
-    let out = '';
-    let pos = start;
-    for (let m = nextMatch; m < matches.length && matches[m]![0] < end; m++) {
-      const [matchStart, matchEnd] = matches[m]!;
-      if (matchEnd <= pos) {
-        continue;
-      }
-      out += joined.slice(pos, Math.min(matchStart, end));
-      if (matchStart >= pos) {
-        out += '[REDACTED]';
-      }
-      pos = Math.min(matchEnd, end);
-    }
-    out += joined.slice(pos, end);
-    cursor = end;
-    while (nextMatch < matches.length && matches[nextMatch]![1] <= cursor) {
-      nextMatch++;
-    }
+    cursor += eventText(event).length;
     options.onStream?.({
       ...event,
-      data: { ...event.data, text: out },
+      data: { ...event.data, text: maskTextSpan(redaction, start, cursor) },
     } as StreamEvent);
   }
+}
+
+// The answer is the text after the last tool call — a suffix of the streamed
+// text. Mask it with the same spans as the stream so a key split across a tool
+// boundary leaves no fragment in the response either.
+function redactAnswerContent(
+  content: string,
+  redaction: KiroTextRedaction,
+  kiroApiKey: string | undefined,
+): string {
+  if (!kiroApiKey) {
+    return content;
+  }
+  if (!redaction.joined.endsWith(content)) {
+    return redactDetail(content, kiroApiKey);
+  }
+  return maskTextSpan(redaction, redaction.joined.length - content.length, redaction.joined.length);
 }
 
 function redactedTrimmedDetail(value: string | undefined, kiroApiKey: string | undefined): string {
@@ -610,7 +632,8 @@ export class KiroClient {
       }
       // The assembled answer also leaves through `result.data.result` and the
       // response body — mask it like every other payload on the stream.
-      const content = redactDetail(parsed.content, effectiveKiroApiKey);
+      const redaction = createTextRedaction(parsed.events, effectiveKiroApiKey);
+      const content = redactAnswerContent(parsed.content, redaction, effectiveKiroApiKey);
       const outputError = content === KIRO_CONTEXT_COMPACTION_NOTICE
         ? KIRO_CONTEXT_COMPACTION_ERROR
         : undefined;
@@ -634,7 +657,7 @@ export class KiroClient {
         ?? parsed.sessionId
         ?? await resolveLatestSessionId(effectiveOptions);
 
-      emitRedactedEvents(options, parsed.events, effectiveKiroApiKey);
+      emitRedactedEvents(options, parsed.events, effectiveKiroApiKey, redaction);
       emitResult(options, content, true, undefined, resolvedSessionId);
 
       return {

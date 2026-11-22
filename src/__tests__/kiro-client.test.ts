@@ -2215,8 +2215,11 @@ describe('callKiro with real kiro-cli ACP stream-json payload', () => {
     const result = await callKiro('coder', 'say hi', { cwd: '/repo', onStream, kiroApiKey: 'kiro-secret-123', sessionId });
 
     expect(result.status).toBe('done');
-    // content は最後のツール呼び出し以降の本文のみ — 断片単体はキーにならない。
-    expect(result.content).toBe('123 suffix');
+    // content は最後のツール呼び出し以降の本文のみだが、ストリームと同じ位置で
+    // マスクするため、キーの後半断片も残らない。
+    expect(result.content).toBe(' suffix');
+    const resultEvent = onStream.mock.calls.at(-1)?.[0] as { data: { result: string } };
+    expect(resultEvent.data.result).toBe(' suffix');
     expect(JSON.stringify(onStream.mock.calls)).not.toContain('kiro-secret-123');
     const emitted = onStream.mock.calls.map(([event]) =>
       event.type === 'text' ? (event.data as { text: string }).text : event.type);
@@ -2224,6 +2227,33 @@ describe('callKiro with real kiro-cli ACP stream-json payload', () => {
     expect(emitted.slice(0, toolUseIndex).join('')).toBe('prefix [REDACTED]');
     const streamedText = emitted
       .filter((item) => !['tool_use', 'tool_result', 'result'].includes(item))
+      .join('');
+    expect(streamedText).toBe('prefix [REDACTED] suffix');
+  });
+
+  // 分割位置がキー先頭寄り (`k` → tool → `iro-secret-123`) でも、
+  // content にキーの大半が残らないことを検証する。
+  it('Given the API key split after its first character across a tool event, When called, Then leaves no key fragment in the content', async () => {
+    mockSpawnWithScenario({
+      stdout: [
+        chunk('prefix k'),
+        toolCallLine,
+        chunk('iro-secret-123 suffix'),
+        JSON.stringify({ type: 'runFinished', data: { sessionId, stopReason: 'end_turn' } }),
+        '',
+      ].join('\n'),
+      code: 0,
+    });
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'say hi', { cwd: '/repo', onStream, kiroApiKey: 'kiro-secret-123', sessionId });
+
+    expect(result.status).toBe('done');
+    expect(result.content).toBe(' suffix');
+    expect(JSON.stringify(onStream.mock.calls)).not.toContain('iro-secret-123');
+    const streamedText = onStream.mock.calls
+      .filter(([event]) => event.type === 'text')
+      .map(([event]) => (event.data as { text: string }).text)
       .join('');
     expect(streamedText).toBe('prefix [REDACTED] suffix');
   });
