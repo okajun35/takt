@@ -2100,6 +2100,45 @@ describe('callKiro with real kiro-cli ACP stream-json payload', () => {
     expect(toolResult.data.content).toBe('key was [REDACTED]');
   });
 
+  it('Given ACP tool events embedding the API key and a runError on exit 0, When called, Then masks the key inside the streamed events', async () => {
+    mockSpawnWithScenario({
+      stdout: [
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call', toolCallId: 'tc-1', title: 'run_command', kind: 'execute', rawInput: { command: 'echo kiro-secret-123' } } } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call_update', toolCallId: 'tc-1', status: 'completed', rawOutput: { message: 'key was kiro-secret-123' } } } }),
+        JSON.stringify({ type: 'runError', data: { sessionId, stage: 'run', message: 'aborted by user', errorType: 'Abort' } }),
+        '',
+      ].join('\n'),
+      code: 0,
+    });
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'say hi', { cwd: '/repo', onStream, kiroApiKey: 'kiro-secret-123' });
+
+    expect(result.status).toBe('error');
+    expect(JSON.stringify(onStream.mock.calls)).not.toContain('kiro-secret-123');
+    expect(JSON.stringify(onStream.mock.calls)).toContain('[REDACTED]');
+  });
+
+  it('Given ACP tool events embedding the API key on a successful run, When called, Then masks the key inside the streamed events', async () => {
+    mockSpawnWithScenario({
+      stdout: [
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call', toolCallId: 'tc-1', title: 'run_command', kind: 'execute', rawInput: { command: 'echo kiro-secret-123' } } } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'tool_call_update', toolCallId: 'tc-1', status: 'completed', rawOutput: { message: 'key was kiro-secret-123' } } } }),
+        JSON.stringify({ type: 'sessionUpdate', data: { sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'done' } } } }),
+        JSON.stringify({ type: 'runFinished', data: { sessionId, stopReason: 'end_turn' } }),
+        '',
+      ].join('\n'),
+      code: 0,
+    });
+
+    const onStream = vi.fn();
+    const result = await callKiro('coder', 'say hi', { cwd: '/repo', onStream, kiroApiKey: 'kiro-secret-123', sessionId });
+
+    expect(result.status).toBe('done');
+    expect(JSON.stringify(onStream.mock.calls)).not.toContain('kiro-secret-123');
+    expect(JSON.stringify(onStream.mock.calls)).toContain('[REDACTED]');
+  });
+
   // JSONL に解釈できない平文 stdout は API キーを含み得る。失敗経路では
   // text イベントとして流さず、マスク済みのプロセス診断として届ける。
   it('Given plaintext stdout embedding the API key on a non-zero exit, When called, Then does not stream raw text and masks the key in the diagnostic', async () => {

@@ -539,7 +539,10 @@ export class KiroClient {
         // as process errors — a runError message can embed credential
         // material, and the stream and the response share the masked value.
         const errorMessage = redactedTrimmedDetail(parsed.error, effectiveKiroApiKey);
-        emitStructuredEvents(options.onStream, parsed.events ?? []);
+        emitStructuredEvents(
+          options.onStream,
+          (parsed.events ?? []).map((event) => redactStreamEvent(event, effectiveKiroApiKey)),
+        );
         emitResult(options, '', false, errorMessage, options.sessionId);
         return {
           persona: agentType,
@@ -574,7 +577,10 @@ export class KiroClient {
         ?? parsed.sessionId
         ?? await resolveLatestSessionId(effectiveOptions);
 
-      emitStructuredEvents(options.onStream, parsed.events);
+      emitStructuredEvents(
+        options.onStream,
+        parsed.events.map((event) => redactStreamEvent(event, effectiveKiroApiKey)),
+      );
       emitResult(options, content, true, undefined, resolvedSessionId);
 
       return {
