@@ -503,7 +503,7 @@ export async function callAIWithRetry(
       // constraint without an ID cannot make that same constraint supported.
       && ctx.providerType !== 'deepseek-harness'
       && (response.failureCategory !== AGENT_FAILURE_CATEGORIES.SESSION_CONTINUATION_UNSUPPORTED
-        || rejectedSession)
+        || (rejectedSession && !firstAttempt.usedTools))
       && ctx.effort === undefined
       && ctx.disableSessionRetry !== true) {
       log.info('Session invalid, retrying without session');

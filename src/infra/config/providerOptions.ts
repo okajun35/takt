@@ -828,7 +828,15 @@ export function selectEnvironmentProviderOptions(
     }
 
     const origin = resolveProviderOptionOrigin(originResolver, path, 'default');
-    if (origin !== 'env' && origin !== 'cli') {
+    // Other roots stay env/CLI-only so runtime profiles cannot inherit
+    // project/global provider options — but a deny-wins grant path keeps
+    // every user-managed origin (env/CLI and the global config file's `true`
+    // leaf), matching the documented grant contract. A project-origin value
+    // is still excluded.
+    const eligible = isDenyWinsProviderOptionPath(path)
+      ? isDenyWinsGrantOrigin(origin)
+      : origin === 'env' || origin === 'cli';
+    if (!eligible) {
       continue;
     }
 

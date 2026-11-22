@@ -195,6 +195,24 @@ describe('resolveEffectiveProviderOptions', () => {
     expect(selectEnvironmentProviderOptions(providerOptions, () => 'local', ['pi'])).toBeUndefined();
   });
 
+  // `kiro.trustWorkspace` は deny-wins パス — env/CLI に加えてグローバル設定
+  // ファイルの `true` も runtime 環境へ引き継ぐ（ドキュメント化された付与契約）。
+  // プロジェクト由来の値は引き続き除外する。
+  it.each(['env', 'cli', 'global'] as const)(
+    'selects kiro.trustWorkspace for runtime environments from a %s origin',
+    (origin) => {
+      const providerOptions = asProviderOptions({ kiro: { trustWorkspace: true } });
+      expect(selectEnvironmentProviderOptions(providerOptions, () => origin, ['kiro']))
+        .toEqual({ kiro: { trustWorkspace: true } });
+    },
+  );
+
+  it('excludes a project-origin kiro.trustWorkspace from runtime environments', () => {
+    const providerOptions = asProviderOptions({ kiro: { trustWorkspace: true } });
+    expect(selectEnvironmentProviderOptions(providerOptions, () => 'local', ['kiro']))
+      .toBeUndefined();
+  });
+
   it('preserves Pi systemPromptMode in a team-leader part while removing Claude allowed tools', () => {
     const result = resolveEffectiveTeamLeaderPartProviderOptions(
       'project',
